@@ -1,0 +1,37 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+:root {
+  --purple: #8b5cf6;
+  --coral: #ff7f50;
+  --text-muted: #6b7280;
+  --text-heading: #1f2937;
+  --canvas-bg: #ffffff;
+  --toolbar-bg: #ffffff;
+  --toolbar-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.08), 0 4px 10px -6px rgba(15, 23, 42, 0.06);
+  --canvas-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.12);
+  --page-gradient: linear-gradient(165deg, #ffe4f0 0%, #fff8fb 45%, #ffffff 100%);
+  --font: 'Segoe UI', system-ui, -apple-system, sans-serif;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  font-family: var(--font);
+  color: var(--text-muted);
+  background: var(--page-gradient);
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  min-height: 100svh;
+  display: flex;
+  justify-content: center;
+}
