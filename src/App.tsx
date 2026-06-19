@@ -1,7 +1,9 @@
 import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react'
 import { DrawingCanvas } from './components/DrawingCanvas'
 import { Toolbar } from './components/Toolbar'
+import { useGestureInputController } from './hooks/useGestureInputController'
 import { useDrawingState } from './hooks/useDrawingState'
+import { useMediaPipeHandTracking } from './hooks/useMediaPipeHandTracking'
 import { DEFAULT_BRUSH_COLOR, DEFAULT_BRUSH_SIZE } from './utils/constants'
 import type { ToolMode } from './types/drawing'
 import './App.css'
@@ -97,6 +99,7 @@ function App() {
   const [color, setColor] = useState(DEFAULT_BRUSH_COLOR)
   const [brushSize, setBrushSize] = useState(DEFAULT_BRUSH_SIZE)
   const [mode, setMode] = useState<ToolMode>('draw')
+  const [gestureEnabled, setGestureEnabled] = useState(true)
   const [instructionsOpen, setInstructionsOpen] = useState(false)
   const [chatDraft, setChatDraft] = useState('')
   const [chatMessages, setChatMessages] = useState([
@@ -125,6 +128,15 @@ function App() {
     },
     [chatDraft],
   )
+
+  const tracking = useMediaPipeHandTracking(gestureEnabled)
+  const { status, preview } = useGestureInputController({
+    frame: tracking.frame,
+    canvas: canvasElRef.current,
+    engine,
+    gestureEnabled,
+    setMode,
+  })
 
   useEffect(() => {
     syncToolSettings({ color, brushSize, mode })
@@ -213,8 +225,8 @@ function App() {
                 activeStroke={activeStroke}
                 engine={engine}
                 toolMode={mode}
-                pointerEnabled
-                cursorOverride={null}
+                pointerEnabled={!gestureEnabled || !status.handDetected}
+                cursorOverride={gestureEnabled ? preview : null}
                 onCanvasReady={handleCanvasReady}
               />
               <span className="cc tl" aria-hidden />
@@ -226,6 +238,33 @@ function App() {
 
           <aside className="game-side px-panel chat-panel" aria-label="Chat">
             <div className="px-panel-title">CHAT</div>
+            <div className="hand-control">
+              <label className="hand-control__toggle">
+                <input
+                  type="checkbox"
+                  checked={gestureEnabled}
+                  onChange={(event) => setGestureEnabled(event.target.checked)}
+                />
+                <span>{gestureEnabled ? 'HAND ON' : 'HAND OFF'}</span>
+              </label>
+              <span className="hand-control__status">
+                {tracking.error
+                  ? 'CAMERA ERROR'
+                  : status.handDetected
+                    ? 'HAND READY'
+                    : tracking.mediaPipeReady
+                      ? 'SHOW HAND'
+                      : 'LOADING'}
+              </span>
+            </div>
+            <video
+              ref={tracking.videoRef}
+              className="webcam-hidden"
+              playsInline
+              muted
+              autoPlay
+              aria-hidden
+            />
             <div className="chat-list" aria-live="polite">
               {chatMessages.map((message, index) => (
                 <div
