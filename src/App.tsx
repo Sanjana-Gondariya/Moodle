@@ -1,9 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react'
 import { DrawingCanvas } from './components/DrawingCanvas'
-import { GestureStatusPanel } from './components/GestureStatusPanel'
 import { Toolbar } from './components/Toolbar'
-import { useGestureInputController } from './hooks/useGestureInputController'
-import { useMediaPipeHandTracking } from './hooks/useMediaPipeHandTracking'
 import { useDrawingState } from './hooks/useDrawingState'
 import { DEFAULT_BRUSH_COLOR, DEFAULT_BRUSH_SIZE } from './utils/constants'
 import type { ToolMode } from './types/drawing'
@@ -100,8 +97,12 @@ function App() {
   const [color, setColor] = useState(DEFAULT_BRUSH_COLOR)
   const [brushSize, setBrushSize] = useState(DEFAULT_BRUSH_SIZE)
   const [mode, setMode] = useState<ToolMode>('draw')
-  const [gestureEnabled, setGestureEnabled] = useState(true)
   const [instructionsOpen, setInstructionsOpen] = useState(false)
+  const [chatDraft, setChatDraft] = useState('')
+  const [chatMessages, setChatMessages] = useState([
+    { name: 'Moodle', text: 'Welcome to the drawing room.' },
+    { name: 'Pixel Pal', text: 'Guess the word as sketches appear.' },
+  ])
 
   const handleCanvasReady = useCallback((canvas: HTMLCanvasElement | null) => {
     canvasElRef.current = canvas
@@ -114,14 +115,16 @@ function App() {
     engine.clear()
   }, [engine])
 
-  const tracking = useMediaPipeHandTracking(gestureEnabled)
-  const { status, preview } = useGestureInputController({
-    frame: tracking.frame,
-    canvas: canvasElRef.current,
-    engine,
-    gestureEnabled,
-    setMode,
-  })
+  const handleChatSubmit = useCallback(
+    (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault()
+      const message = chatDraft.trim()
+      if (!message) return
+      setChatMessages((current) => [...current, { name: 'You', text: message }])
+      setChatDraft('')
+    },
+    [chatDraft],
+  )
 
   useEffect(() => {
     syncToolSettings({ color, brushSize, mode })
@@ -149,7 +152,7 @@ function App() {
             onClick={() => setInstructionsOpen(true)}
             aria-haspopup="dialog"
           >
-            ?
+            HELP?
           </button>
           <div className="word-bar__prompt" aria-label="Current word">
             {'MOODLE'.split('').map((char, index) => (
@@ -210,8 +213,8 @@ function App() {
                 activeStroke={activeStroke}
                 engine={engine}
                 toolMode={mode}
-                pointerEnabled={!gestureEnabled || !status.handDetected}
-                cursorOverride={gestureEnabled ? preview : null}
+                pointerEnabled
+                cursorOverride={null}
                 onCanvasReady={handleCanvasReady}
               />
               <span className="cc tl" aria-hidden />
@@ -221,34 +224,31 @@ function App() {
             </div>
           </section>
 
-          <aside className="game-side px-panel" aria-label="Gesture controls">
-            <div className="px-panel-title">GESTURES</div>
-            <section className="gesture-panel">
-              <label className="gesture-panel__toggle">
-                <input
-                  type="checkbox"
-                  checked={gestureEnabled}
-                  onChange={(e) => setGestureEnabled(e.target.checked)}
-                />
-                <span>MEDIAPIPE</span>
-              </label>
-              {/* Hidden capture surface: MediaPipe needs a playing video element; do not show the feed in UI. */}
-              <video
-                ref={tracking.videoRef}
-                className="webcam-hidden"
-                playsInline
-                muted
-                autoPlay
-                aria-hidden
+          <aside className="game-side px-panel chat-panel" aria-label="Chat">
+            <div className="px-panel-title">CHAT</div>
+            <div className="chat-list" aria-live="polite">
+              {chatMessages.map((message, index) => (
+                <div
+                  className={`chat-bubble${message.name === 'You' ? ' chat-bubble--me' : ''}`}
+                  key={`${message.name}-${index}`}
+                >
+                  <span className="chat-bubble__name">{message.name}</span>
+                  <span className="chat-bubble__text">{message.text}</span>
+                </div>
+              ))}
+            </div>
+            <form className="chat-form" onSubmit={handleChatSubmit}>
+              <input
+                className="chat-input"
+                value={chatDraft}
+                onChange={(event) => setChatDraft(event.target.value)}
+                placeholder="Type guess"
+                aria-label="Chat message"
               />
-              <GestureStatusPanel
-                webcamReady={tracking.webcamReady}
-                mediaPipeReady={tracking.mediaPipeReady}
-                error={tracking.error}
-                status={status}
-                currentToolMode={mode}
-              />
-            </section>
+              <button className="chat-send" type="submit">
+                SEND
+              </button>
+            </form>
           </aside>
         </main>
       </div>
