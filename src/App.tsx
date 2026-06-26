@@ -8,6 +8,36 @@ import { DEFAULT_BRUSH_COLOR, DEFAULT_BRUSH_SIZE } from './utils/constants'
 import type { ToolMode } from './types/drawing'
 import './App.css'
 
+const WORD_OPTIONS = ['MOODLE', 'ROCKET', 'PIZZA', 'CASTLE', 'ROBOT', 'FLOWER', 'SUN', 'CAT']
+const ROUND_SECONDS = 60
+
+interface ChatMessage {
+  name: string
+  text: string
+  role?: 'player' | 'ai' | 'system'
+  correct?: boolean
+}
+
+function getAiGuessMessage(stage: number, totalPoints: number, strokeCount: number, word: string) {
+  if (stage <= 1) {
+    return 'I see the sketch starting. Maybe a box?'
+  }
+
+  if (stage === 2) {
+    return strokeCount > 3 ? 'The lines look intentional. My guess is letters.' : 'I need more lines, but I see a shape forming.'
+  }
+
+  if (stage === 3) {
+    return totalPoints > 90 ? 'This looks like a word or logo.' : 'I think this might be a sign.'
+  }
+
+  return `My final guess is ${word.toLowerCase()}.`
+}
+
+function normalizeGuess(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, '')
+}
+
 function PixelBackdrop() {
   return (
     <>
@@ -85,6 +115,39 @@ function PixelBackdrop() {
   )
 }
 
+function HomeScreen({ onStart }: { onStart: () => void }) {
+  return (
+    <main className="home-screen">
+      <section className="home-hero" aria-labelledby="home-title">
+        <p className="home-hero__eyebrow">Pixel drawing game</p>
+        <h1 className="home-hero__title" id="home-title">
+          Moodle
+        </h1>
+        <div className="home-mascot" aria-hidden>
+          <div className="home-mascot__face">
+            <span className="home-mascot__ear home-mascot__ear--left" />
+            <span className="home-mascot__ear home-mascot__ear--right" />
+            <span className="home-mascot__eye home-mascot__eye--left" />
+            <span className="home-mascot__eye home-mascot__eye--right" />
+            <span className="home-mascot__nose" />
+            <span className="home-mascot__mouth" />
+          </div>
+          <div className="home-mascot__shadow" />
+        </div>
+        <div className="home-panel">
+          <div className="px-panel-title">DRAWING ROOM</div>
+          <div className="home-panel__body">
+            <p>Sketch the word, chat with players, and draw by mouse, touch, or hand.</p>
+            <button className="flag-btn" type="button" onClick={onStart}>
+              START DRAWING
+            </button>
+          </div>
+        </div>
+      </section>
+    </main>
+  )
+}
+
 /**
  * Composes tool UI + drawing model + canvas view. Transport and ML stay out of this file.
  *
@@ -95,16 +158,22 @@ function PixelBackdrop() {
 function App() {
   const { strokes, activeStroke, engine, syncToolSettings, canUndo, canRedo } = useDrawingState()
   const canvasElRef = useRef<HTMLCanvasElement | null>(null)
+  const lastAiGuessStageRef = useRef(0)
 
   const [color, setColor] = useState(DEFAULT_BRUSH_COLOR)
   const [brushSize, setBrushSize] = useState(DEFAULT_BRUSH_SIZE)
   const [mode, setMode] = useState<ToolMode>('draw')
   const [gestureEnabled, setGestureEnabled] = useState(true)
   const [instructionsOpen, setInstructionsOpen] = useState(false)
+  const [screen, setScreen] = useState<'home' | 'game'>('home')
+  const [currentWord, setCurrentWord] = useState(WORD_OPTIONS[0]!)
+  const [hasCorrectGuess, setHasCorrectGuess] = useState(false)
+  const [timeLeft, setTimeLeft] = useState(ROUND_SECONDS)
+  const [roundEnded, setRoundEnded] = useState(false)
   const [chatDraft, setChatDraft] = useState('')
-  const [chatMessages, setChatMessages] = useState([
-    { name: 'Moodle', text: 'Welcome to the drawing room.' },
-    { name: 'Pixel Pal', text: 'Guess the word as sketches appear.' },
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
+    { name: 'Moodle', text: 'Welcome to the drawing room.', role: 'system' },
+    { name: 'Pixel Pal', text: 'AI player ready. I will guess while you draw.', role: 'ai' },
   ])
 
   const handleCanvasReady = useCallback((canvas: HTMLCanvasElement | null) => {
@@ -123,18 +192,61 @@ function App() {
       event.preventDefault()
       const message = chatDraft.trim()
       if (!message) return
-      setChatMessages((current) => [...current, { name: 'You', text: message }])
+      const isCorrectGuess = !roundEnded && normalizeGuess(message) === normalizeGuess(currentWord)
+      setChatMessages((current) => [
+        ...current,
+        { name: 'You', text: message, role: 'player', correct: isCorrectGuess },
+        ...(isCorrectGuess && !hasCorrectGuess
+          ? [
+              {
+                name: 'Moodle',
+                text: `Correct! The word was ${currentWord}.`,
+                role: 'system' as const,
+                correct: true,
+              },
+            ]
+          : []),
+      ])
+      if (isCorrectGuess) {
+        setHasCorrectGuess(true)
+        setRoundEnded(true)
+      }
       setChatDraft('')
     },
-    [chatDraft],
+    [chatDraft, currentWord, hasCorrectGuess, roundEnded],
   )
 
-  const tracking = useMediaPipeHandTracking(gestureEnabled)
+  const handleWordChange = useCallback(
+    (word: string) => {
+      setCurrentWord(word)
+      setHasCorrectGuess(false)
+      setRoundEnded(false)
+      setTimeLeft(ROUND_SECONDS)
+      lastAiGuessStageRef.current = 0
+      engine.clear()
+      setChatMessages((current) => [
+        ...current,
+        {
+          name: 'Moodle',
+          text: `New word picked: ${word}.`,
+          role: 'system',
+        },
+        {
+          name: 'Pixel Pal',
+          text: 'I am watching the new sketch.',
+          role: 'ai',
+        },
+      ])
+    },
+    [engine],
+  )
+
+  const tracking = useMediaPipeHandTracking(gestureEnabled && screen === 'game')
   const { status, preview } = useGestureInputController({
     frame: tracking.frame,
     canvas: canvasElRef.current,
     engine,
-    gestureEnabled,
+    gestureEnabled: gestureEnabled && screen === 'game',
     setMode,
   })
 
@@ -142,18 +254,82 @@ function App() {
     syncToolSettings({ color, brushSize, mode })
   }, [color, brushSize, mode, syncToolSettings])
 
+  useEffect(() => {
+    if (screen !== 'game' || hasCorrectGuess || roundEnded) return
+
+    const timerId = window.setInterval(() => {
+      setTimeLeft((current) => {
+        if (current <= 1) {
+          window.clearInterval(timerId)
+          setRoundEnded(true)
+          setChatMessages((messages) => [
+            ...messages,
+            {
+              name: 'Moodle',
+              text: `Time is up! The word was ${currentWord}.`,
+              role: 'system',
+            },
+          ])
+          return 0
+        }
+
+        return current - 1
+      })
+    }, 1000)
+
+    return () => window.clearInterval(timerId)
+  }, [currentWord, hasCorrectGuess, roundEnded, screen])
+
+  useEffect(() => {
+    if (screen !== 'game') return
+    if (hasCorrectGuess || roundEnded) return
+
+    const strokePointCount = strokes.reduce((total, stroke) => total + stroke.points.length, 0)
+    const activePointCount = activeStroke?.points.length ?? 0
+    const totalPoints = strokePointCount + activePointCount
+
+    if (totalPoints === 0) {
+      lastAiGuessStageRef.current = 0
+      return
+    }
+
+    const stage = Math.min(4, Math.floor(totalPoints / 28) + Math.floor(strokes.length / 3))
+    if (stage <= 0 || stage <= lastAiGuessStageRef.current) return
+
+    lastAiGuessStageRef.current = stage
+    const message = getAiGuessMessage(stage, totalPoints, strokes.length, currentWord)
+    window.setTimeout(() => {
+      setChatMessages((current) => [
+        ...current,
+        {
+          name: 'Pixel Pal',
+          text: message,
+          role: 'ai',
+        },
+      ])
+    }, 650)
+  }, [activeStroke, currentWord, hasCorrectGuess, roundEnded, screen, strokes])
+
   return (
     <>
       <PixelBackdrop />
+      {screen === 'home' && <HomeScreen onStart={() => setScreen('game')} />}
+      {screen === 'game' && (
       <div className="app">
         <header className="app__header">
           <div>
             <p className="app__eyebrow">Drawing workspace</p>
             <h1 className="app__title">Moodle</h1>
           </div>
-          <div className="round-box" aria-label="Round">
-            <span className="r-lbl">ROUND</span>
-            <span className="r-num">1 / 3</span>
+          <div className="header-stats">
+            <div className="round-box" aria-label="Round">
+              <span className="r-lbl">ROUND</span>
+              <span className="r-num">1 / 3</span>
+            </div>
+            <div className={`timer-box${timeLeft <= 10 && !roundEnded ? ' timer-box--danger' : ''}`} aria-label="Timer">
+              <span className="r-lbl">TIME</span>
+              <span className="r-num">{timeLeft}s</span>
+            </div>
           </div>
         </header>
 
@@ -167,12 +343,26 @@ function App() {
             HELP?
           </button>
           <div className="word-bar__prompt" aria-label="Current word">
-            {'MOODLE'.split('').map((char, index) => (
+            {currentWord.split('').map((char, index) => (
               <span key={`${char}-${index}`} className={`wch${char === ' ' ? ' spc' : ''}`}>
                 {char === ' ' ? '\u00A0' : char}
               </span>
             ))}
           </div>
+          <label className="word-picker">
+            <span>WORD</span>
+            <select
+              value={currentWord}
+              onChange={(event) => handleWordChange(event.target.value)}
+              aria-label="Pick drawing word"
+            >
+              {WORD_OPTIONS.map((word) => (
+                <option key={word} value={word}>
+                  {word}
+                </option>
+              ))}
+            </select>
+          </label>
         </section>
 
         <main className="game-grid">
@@ -188,10 +378,10 @@ function App() {
                 <span className="draw-ind">✎</span>
               </div>
               <div className="gp-card guessed">
-                <span className="gp-av">🐟</span>
+                <span className="gp-av">AI</span>
                 <span className="gp-info">
                   <span className="gp-nm">Pixel Pal</span>
-                  <span className="gp-sc">240</span>
+                  <span className="gp-sc">AI guessing</span>
                 </span>
               </div>
               <div className="gp-card">
@@ -268,7 +458,11 @@ function App() {
             <div className="chat-list" aria-live="polite">
               {chatMessages.map((message, index) => (
                 <div
-                  className={`chat-bubble${message.name === 'You' ? ' chat-bubble--me' : ''}`}
+                  className={`chat-bubble${message.name === 'You' ? ' chat-bubble--me' : ''}${
+                    message.role === 'ai' ? ' chat-bubble--ai' : ''
+                  }${message.role === 'system' ? ' chat-bubble--system' : ''}${
+                    message.correct ? ' chat-bubble--correct' : ''
+                  }`}
                   key={`${message.name}-${index}`}
                 >
                   <span className="chat-bubble__name">{message.name}</span>
@@ -291,6 +485,7 @@ function App() {
           </aside>
         </main>
       </div>
+      )}
       {instructionsOpen && (
         <div className="modal-bg" role="presentation" onClick={() => setInstructionsOpen(false)}>
           <section
