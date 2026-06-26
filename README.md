@@ -1,16 +1,78 @@
-# React + Vite
+# Moodle
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+**Moodle** is a pixel-art drawing game website built with React and Vite. Players enter a drawing room, sketch the mystery word, and use the chat box to guess as drawings appear. The app supports mouse, touch, and hand gesture drawing for a more interactive canvas experience.
 
-Currently, two official plugins are available:
+## Demo
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+Run the project locally, then open the local Vite URL.
 
-## React Compiler
+```bash
+npm run dev
+```
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+```text
+http://127.0.0.1:5173/
+```
 
-## Expanding the ESLint configuration
+## Project Structure
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+```mermaid
+flowchart TD
+  A["App.tsx"] --> B["Homepage"]
+  A --> C["Drawing Room"]
+  C --> D["Word Bar"]
+  C --> E["Drawing Canvas"]
+  C --> F["Toolbar"]
+  C --> G["Chat Box"]
+  C --> H["Help Dialog"]
+  E --> I["Drawing State"]
+  E --> J["Pointer Input"]
+  E --> K["Hand Gesture Input"]
+```
+
+```text
+src/
+  components/     Drawing canvas, cursor, toolbar, and UI panels
+  hooks/          Drawing state, pointer input, and hand tracking logic
+  utils/          Gesture detection, coordinate mapping, and stroke rendering
+  types/          Shared drawing types
+  App.tsx         Main page flow and layout
+  App.css         Pixel-art UI styling
+```
+
+## Frontend
+
+| Area | Purpose |
+| --- | --- |
+| Homepage | Introduces Moodle and opens the drawing room |
+| Drawing room | Main game screen with the canvas, word bar, player panel, and chat |
+| Canvas | Supports mouse, touch, and hand-based drawing |
+| Help dialog | Shows the game instructions from the word bar |
+
+## Special Features
+
+- Pixel-art themed interface
+- Large responsive drawing canvas
+- Bold readable word bar
+- Mouse and touch drawing
+- Hand gesture drawing with MediaPipe
+- Chat box for guesses
+- Help dialog with instructions
+
+## How It Works
+
+1. The homepage opens the drawing room when the player starts.
+2. The word bar shows the current mystery word as letter boxes.
+3. Pointer input and hand gestures both send drawing points to the canvas.
+4. The drawing engine stores each stroke with its color, size, and tool mode.
+5. The canvas redraws saved strokes whenever the drawing state changes.
+
+## Tech Stack
+
+| Layer | Tools |
+| --- | --- |
+| Frontend | React, TypeScript |
+| Build tool | Vite |
+| Drawing | HTML Canvas |
+| Hand tracking | MediaPipe Tasks Vision |
+| Styling | CSS |
