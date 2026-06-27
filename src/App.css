@@ -353,8 +353,28 @@ body {
 .home-actions {
   width: 100%;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
+}
+
+.home-setup {
+  width: 100%;
+  padding: 12px;
+  display: grid;
+  gap: 12px;
+  border: 3px solid var(--outline);
+  background: var(--panel-in);
+  box-shadow: 3px 3px 0 var(--outline);
+  text-align: left;
+}
+
+.setup-summary {
+  margin: 0;
+  color: var(--outline);
+  font-size: 11px;
+  font-weight: 900;
+  text-align: center;
+  text-transform: uppercase;
 }
 
 .flag-btn {
@@ -839,6 +859,35 @@ body {
   float: right;
 }
 
+.transition-panel--final {
+  grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.4fr) auto;
+  background: var(--gold-lt);
+}
+
+.transition-panel li.winner {
+  padding: 5px;
+  background: var(--gold);
+  outline: 3px solid var(--outline);
+}
+
+.end-game-actions {
+  display: grid;
+  align-content: center;
+  gap: 8px;
+}
+
+.lobby-code {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.lobby-meta {
+  color: var(--text-muted) !important;
+  font-size: 11px !important;
+  line-height: 1.5;
+}
+
 .lobby-panel {
   padding: 12px;
   display: grid;
@@ -1011,6 +1060,64 @@ body {
   border: 3px solid var(--outline);
   background: var(--panel-in);
   box-shadow: 2px 2px 0 var(--outline);
+}
+
+.gp-rank {
+  min-width: 24px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.gp-card.guessed .gp-sc,
+.gp-card.drawing .gp-sc {
+  animation: score-pop 420ms steps(2);
+}
+
+@keyframes score-pop {
+  50% {
+    transform: scale(1.14);
+  }
+}
+
+.notification-stack {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  z-index: 100;
+  width: min(330px, calc(100vw - 28px));
+  display: grid;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.game-notification {
+  padding: 11px 13px;
+  border: 3px solid var(--outline);
+  background: var(--white);
+  box-shadow: 4px 4px 0 var(--outline);
+  color: var(--outline);
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1.35;
+  animation: notification-in 180ms steps(2);
+}
+
+.game-notification--success {
+  background: #e8ffec;
+  border-color: var(--green-dk);
+}
+
+.game-notification--error {
+  background: #ffe0e0;
+  border-color: var(--red);
+}
+
+@keyframes notification-in {
+  from {
+    transform: translateY(-8px);
+    opacity: 0;
+  }
 }
 
 .gp-card.drawing {
@@ -1626,7 +1733,15 @@ body {
   }
 
   .game-side:first-child {
-    display: none;
+    display: flex;
+    grid-column: 1 / -1;
+  }
+
+  .game-side:first-child .side-list {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(180px, 1fr);
+    overflow-x: auto;
   }
 }
 
@@ -1644,6 +1759,10 @@ body {
 
   .home-actions {
     grid-template-columns: 1fr;
+  }
+
+  .ai-settings {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .room-code-card {
@@ -1670,6 +1789,11 @@ body {
     align-items: stretch;
   }
 
+  .transition-panel,
+  .transition-panel--final {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .lobby-settings {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1688,7 +1812,8 @@ body {
   }
 
   .game-side:first-child {
-    display: none;
+    display: flex;
+    grid-column: auto;
   }
 
   .chat-panel {
