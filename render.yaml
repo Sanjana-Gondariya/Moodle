@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: moodle-game
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: HOST
+        value: 0.0.0.0
+      - key: PORT
+        value: 8787
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ALLOWED_ORIGIN
+        sync: false
+    disk:
+      name: moodle-data
+      mountPath: /app/server-data
+      sizeGB: 1
