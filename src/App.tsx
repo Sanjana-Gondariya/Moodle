@@ -5,11 +5,38 @@ import { useGestureInputController } from './hooks/useGestureInputController'
 import { useDrawingState } from './hooks/useDrawingState'
 import { useMediaPipeHandTracking } from './hooks/useMediaPipeHandTracking'
 import { DEFAULT_BRUSH_COLOR, DEFAULT_BRUSH_SIZE } from './utils/constants'
-import type { ToolMode } from './types/drawing'
+import type { Stroke, ToolMode } from './types/drawing'
 import './App.css'
 
 const WORD_OPTIONS = ['MOODLE', 'ROCKET', 'PIZZA', 'CASTLE', 'ROBOT', 'FLOWER', 'SUN', 'CAT']
 const ROUND_SECONDS = 60
+const LOCAL_API_ORIGIN = 'http://127.0.0.1:8787'
+const API_ORIGIN = import.meta.env.VITE_API_ORIGIN || (import.meta.env.PROD ? window.location.origin : LOCAL_API_ORIGIN)
+const PIXEL_PAL_API_URL = import.meta.env.VITE_PIXEL_PAL_API_URL || `${API_ORIGIN}/api/guess`
+const ROOM_API_URL = import.meta.env.VITE_ROOM_API_URL || `${API_ORIGIN}/api/rooms`
+const PUBLIC_ROOMS_API_URL = import.meta.env.VITE_PUBLIC_ROOMS_API_URL || `${API_ORIGIN}/api/public-rooms`
+const HISTORY_API_URL = import.meta.env.VITE_HISTORY_API_URL || `${API_ORIGIN}/api/history`
+const ROOM_WS_URL =
+  import.meta.env.VITE_ROOM_WS_URL ||
+  `${API_ORIGIN.replace(/^http/, 'ws')}/ws`
+const AVATAR_OPTIONS = [
+  { id: 'cat', label: 'Cat', icon: '🐱' },
+  { id: 'star', label: 'Star', icon: '⭐' },
+  { id: 'fish', label: 'Fish', icon: '🐟' },
+  { id: 'robot', label: 'Robot', icon: '🤖' },
+]
+const AI_PLAYERS = [
+  { id: 'pixel-pal', name: 'Pixel Pal', avatar: 'robot' },
+  { id: 'Sketch Bot', name: 'Sketch Bot', avatar: 'star' },
+  { id: 'Doodle AI', name: 'Doodle AI', avatar: 'fish' },
+  { id: 'Line Buddy', name: 'Line Buddy', avatar: 'cat' },
+]
+const AI_WRONG_GUESSES = ['HOUSE', 'TREE', 'CLOUD', 'BOOK', 'CHAIR', 'STAR']
+const AI_DIFFICULTY_CONFIG = {
+  easy: { pointStep: 95, delayMs: 5200, accuracy: 0.35 },
+  medium: { pointStep: 62, delayMs: 3200, accuracy: 0.58 },
+  hard: { pointStep: 38, delayMs: 1700, accuracy: 0.78 },
+} as const
 
 interface ChatMessage {
   name: string
@@ -18,24 +45,134 @@ interface ChatMessage {
   correct?: boolean
 }
 
-function getAiGuessMessage(stage: number, totalPoints: number, strokeCount: number, word: string) {
-  if (stage <= 1) {
-    return 'I see the sketch starting. Maybe a box?'
-  }
+interface RoomPlayer {
+  id: string
+  name: string
+  avatar: string
+  score: number
+  isAi: boolean
+  isSpectator: boolean
+  disconnected: boolean
+  guessed: boolean
+  isDrawer: boolean
+  isHost: boolean
+}
 
-  if (stage === 2) {
-    return strokeCount > 3 ? 'The lines look intentional. My guess is letters.' : 'I need more lines, but I see a shape forming.'
-  }
+type AiDifficulty = keyof typeof AI_DIFFICULTY_CONFIG
 
-  if (stage === 3) {
-    return totalPoints > 90 ? 'This looks like a word or logo.' : 'I think this might be a sign.'
-  }
+interface AiSettings {
+  count: number
+  difficulty: AiDifficulty
+  canDraw: boolean
+}
 
-  return `My final guess is ${word.toLowerCase()}.`
+interface RoomSettings {
+  rounds: number
+  drawTime: number
+  aiDifficulty: AiDifficulty
+  aiCanDraw: boolean
+  isPublic: boolean
+  language: 'en' | 'es'
+  wordDifficulty: 'easy' | 'medium' | 'hard'
+  customWordMode: 'disabled' | 'mixed' | 'only'
+  customWords: string[]
+}
+
+interface PublicRoom {
+  code: string
+  playerCount: number
+  maxPlayers: number
+  phase: string
+  rounds: number
+  drawTime: number
+  aiDifficulty: AiDifficulty
+  aiCanDraw: boolean
+  language: string
+  wordDifficulty: string
+}
+
+interface HistorySummary {
+  games: Array<{ roomCode: string; endedAt: string; players: RoomPlayer[] }>
+  reports: Array<{ roomCode: string; reporter: string; reported: string; createdAt: string }>
+}
+
+interface AiPlayer {
+  id: string
+  name: string
+  avatar: string
+  score: number
+  guessed: boolean
 }
 
 function normalizeGuess(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]/g, '')
+}
+
+function normalizeRoomCode(value: string) {
+  return value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5)
+}
+
+function sanitizeDisplayName(value: string) {
+  return value.replace(/[<>]/g, '').slice(0, 20)
+}
+
+function isValidDisplayName(value: string) {
+  const trimmed = value.trim()
+  return trimmed.length >= 3 && trimmed.length <= 20
+}
+
+function avatarIcon(avatarId: string) {
+  return AVATAR_OPTIONS.find((avatar) => avatar.id === avatarId)?.icon || 'P'
+}
+
+function getAnonymousSessionId() {
+  const existing = localStorage.getItem('moodle-session-id')
+  if (existing) return existing
+  const next = crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`
+  localStorage.setItem('moodle-session-id', next)
+  return next
+}
+
+async function createServerRoom() {
+  const response = await fetch(ROOM_API_URL, { method: 'POST' })
+  const payload = await response.json()
+  if (!response.ok || typeof payload.roomCode !== 'string') {
+    throw new Error(payload.error || 'Could not create room.')
+  }
+  return payload.roomCode
+}
+
+async function requestPixelPalGuess(imageDataUrl: string) {
+  const response = await fetch(PIXEL_PAL_API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      imageDataUrl,
+      wordOptions: WORD_OPTIONS,
+    }),
+  })
+
+  const payload = await response.json()
+  if (!response.ok) {
+    throw new Error(payload.error || 'Pixel Pal could not guess.')
+  }
+
+  return String(payload.guess || '').trim()
+}
+
+function createAiPlayers(count: number): AiPlayer[] {
+  return AI_PLAYERS.slice(0, count).map((player) => ({
+    ...player,
+    score: 0,
+    guessed: false,
+  }))
+}
+
+function pickWrongAiGuess(currentWord: string) {
+  const options = AI_WRONG_GUESSES.filter((guess) => normalizeGuess(guess) !== normalizeGuess(currentWord))
+  return options[Math.floor(Math.random() * options.length)] || 'SKETCH'
 }
 
 function PixelBackdrop() {
@@ -115,7 +252,91 @@ function PixelBackdrop() {
   )
 }
 
-function HomeScreen({ onStart }: { onStart: () => void }) {
+function HomeScreen({
+  onCreateRoom,
+  onJoinRoom,
+  onPlayAi,
+  activeRoomCode,
+}: {
+  onCreateRoom: (name: string, avatar: string) => void
+  onJoinRoom: (code: string, name: string, avatar: string, spectator?: boolean) => void
+  onPlayAi: (name: string, avatar: string, settings: AiSettings) => void
+  activeRoomCode: string | null
+}) {
+  const [joinCode, setJoinCode] = useState('')
+  const [displayName, setDisplayName] = useState('')
+  const [avatar, setAvatar] = useState(AVATAR_OPTIONS[0]!.id)
+  const [aiCount, setAiCount] = useState(1)
+  const [aiDifficulty, setAiDifficulty] = useState<AiDifficulty>('medium')
+  const [aiCanDraw, setAiCanDraw] = useState(false)
+  const [publicRooms, setPublicRooms] = useState<PublicRoom[]>([])
+  const [publicRoomsStatus, setPublicRoomsStatus] = useState('')
+  const [history, setHistory] = useState<HistorySummary>({ games: [], reports: [] })
+  const trimmedName = displayName.trim()
+  const nameValid = isValidDisplayName(displayName)
+
+  const handleJoinSubmit = useCallback(
+    (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault()
+      const code = normalizeRoomCode(joinCode)
+      if (code.length !== 5 || !nameValid) return
+      onJoinRoom(code, trimmedName, avatar)
+    },
+    [avatar, joinCode, nameValid, onJoinRoom, trimmedName],
+  )
+
+  const handleCopyRoomCode = useCallback(() => {
+    if (!activeRoomCode) return
+    void navigator.clipboard?.writeText(activeRoomCode)
+  }, [activeRoomCode])
+
+  const refreshPublicRooms = useCallback(async () => {
+    try {
+      setPublicRoomsStatus('Loading rooms...')
+      const response = await fetch(PUBLIC_ROOMS_API_URL)
+      const payload = await response.json()
+      setPublicRooms(Array.isArray(payload.rooms) ? payload.rooms : [])
+      setPublicRoomsStatus('')
+    } catch {
+      setPublicRoomsStatus('Could not load public rooms.')
+    }
+  }, [])
+
+  useEffect(() => {
+    void refreshPublicRooms()
+    const timerId = window.setInterval(refreshPublicRooms, 5000)
+    return () => window.clearInterval(timerId)
+  }, [refreshPublicRooms])
+
+  const refreshHistory = useCallback(async () => {
+    try {
+      const response = await fetch(HISTORY_API_URL)
+      const payload = await response.json()
+      setHistory({
+        games: Array.isArray(payload.games) ? payload.games : [],
+        reports: Array.isArray(payload.reports) ? payload.reports : [],
+      })
+    } catch {
+      setHistory({ games: [], reports: [] })
+    }
+  }, [])
+
+  useEffect(() => {
+    void refreshHistory()
+  }, [refreshHistory])
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const code = normalizeRoomCode(params.get('room') || '')
+    const spectator = params.get('spectate') === '1'
+    if (code.length === 5) {
+      setJoinCode(code)
+      if (spectator && nameValid) {
+        onJoinRoom(code, trimmedName, avatar, true)
+      }
+    }
+  }, [avatar, nameValid, onJoinRoom, trimmedName])
+
   return (
     <main className="home-screen">
       <section className="home-hero" aria-labelledby="home-title">
@@ -138,9 +359,157 @@ function HomeScreen({ onStart }: { onStart: () => void }) {
           <div className="px-panel-title">DRAWING ROOM</div>
           <div className="home-panel__body">
             <p>Sketch the word, chat with players, and draw by mouse, touch, or hand.</p>
-            <button className="flag-btn" type="button" onClick={onStart}>
-              START DRAWING
-            </button>
+            <div className="profile-setup">
+              <label htmlFor="display-name">DISPLAY NAME</label>
+              <input
+                id="display-name"
+                value={displayName}
+                onChange={(event) => setDisplayName(sanitizeDisplayName(event.target.value))}
+                placeholder="3-20 letters"
+                maxLength={20}
+                aria-invalid={displayName.length > 0 && !nameValid}
+              />
+              <div className="avatar-picker" aria-label="Choose avatar">
+                {AVATAR_OPTIONS.map((option) => (
+                  <button
+                    type="button"
+                    className={avatar === option.id ? 'avatar-picker__btn avatar-picker__btn--active' : 'avatar-picker__btn'}
+                    key={option.id}
+                    onClick={() => setAvatar(option.id)}
+                    aria-label={option.label}
+                  >
+                    {option.icon}
+                  </button>
+                ))}
+              </div>
+              {displayName.length > 0 && !nameValid && (
+                <span className="profile-setup__error">Name must be 3-20 characters.</span>
+              )}
+            </div>
+            <div className="home-actions" aria-label="Game modes">
+              <button
+                className="flag-btn"
+                type="button"
+                onClick={() => onCreateRoom(trimmedName, avatar)}
+                disabled={!nameValid}
+              >
+                CREATE ROOM
+              </button>
+              <button
+                className="flag-btn flag-btn--secondary"
+                type="button"
+                onClick={() =>
+                  onPlayAi(trimmedName, avatar, {
+                    count: aiCount,
+                    difficulty: aiDifficulty,
+                    canDraw: aiCanDraw,
+                  })
+                }
+                disabled={!nameValid}
+              >
+                PLAY WITH AI
+              </button>
+            </div>
+            <div className="ai-settings" aria-label="AI settings">
+              <label>
+                AI PLAYERS
+                <select value={aiCount} onChange={(event) => setAiCount(Number(event.target.value))}>
+                  <option value={1}>1</option>
+                  <option value={2}>2</option>
+                  <option value={3}>3</option>
+                  <option value={4}>4</option>
+                </select>
+              </label>
+              <label>
+                DIFFICULTY
+                <select
+                  value={aiDifficulty}
+                  onChange={(event) => setAiDifficulty(event.target.value as AiDifficulty)}
+                >
+                  <option value="easy">Easy</option>
+                  <option value="medium">Medium</option>
+                  <option value="hard">Hard</option>
+                </select>
+              </label>
+              <label className="ai-settings__toggle">
+                <input
+                  type="checkbox"
+                  checked={aiCanDraw}
+                  onChange={(event) => setAiCanDraw(event.target.checked)}
+                />
+                AI DRAW
+              </label>
+            </div>
+            {activeRoomCode && (
+              <div className="room-code-card" aria-live="polite">
+                <span>ROOM CODE</span>
+                <strong>{activeRoomCode}</strong>
+                <button type="button" onClick={handleCopyRoomCode}>
+                  COPY
+                </button>
+              </div>
+            )}
+            <form className="join-room-form" onSubmit={handleJoinSubmit}>
+              <label htmlFor="join-room-code">JOIN ROOM</label>
+              <div className="join-room-form__row">
+                <input
+                  id="join-room-code"
+                  value={joinCode}
+                  onChange={(event) => setJoinCode(normalizeRoomCode(event.target.value))}
+                  placeholder="CODE"
+                  maxLength={5}
+                  aria-label="Room code"
+                />
+                <button type="submit" disabled={joinCode.length !== 5 || !nameValid}>
+                  JOIN
+                </button>
+                <button
+                  type="button"
+                  disabled={joinCode.length !== 5 || !nameValid}
+                  onClick={() => onJoinRoom(joinCode, trimmedName, avatar, true)}
+                >
+                  WATCH
+                </button>
+              </div>
+            </form>
+            <div className="public-rooms" aria-label="Public rooms">
+              <div className="public-rooms__head">
+                <span>PUBLIC ROOMS</span>
+                <button type="button" onClick={refreshPublicRooms}>
+                  REFRESH
+                </button>
+              </div>
+              {publicRoomsStatus && <p>{publicRoomsStatus}</p>}
+              {publicRooms.length === 0 && !publicRoomsStatus && <p>No public rooms yet.</p>}
+              {publicRooms.map((room) => (
+                <button
+                  type="button"
+                  className="public-room"
+                  key={room.code}
+                  onClick={() => onJoinRoom(room.code, trimmedName, avatar)}
+                  disabled={!nameValid || room.playerCount >= room.maxPlayers}
+                >
+                  <strong>{room.code}</strong>
+                  <span>{room.playerCount}/{room.maxPlayers} players</span>
+                  <span>{room.wordDifficulty} · {room.language}</span>
+                </button>
+              ))}
+            </div>
+            <div className="history-panel" aria-label="Recent activity">
+              <div className="public-rooms__head">
+                <span>RECENT</span>
+                <button type="button" onClick={refreshHistory}>
+                  UPDATE
+                </button>
+              </div>
+              {history.games.length === 0 && <p>No finished games yet.</p>}
+              {history.games.slice(0, 3).map((game) => (
+                <p key={`${game.roomCode}-${game.endedAt}`}>
+                  {game.roomCode}: {game.players[0]?.name || 'No winner'} won
+                </p>
+              ))}
+              {history.reports.length > 0 && <p>{history.reports.length} recent report(s)</p>}
+            </div>
           </div>
         </div>
       </section>
@@ -156,9 +525,26 @@ function HomeScreen({ onStart }: { onStart: () => void }) {
  *         and feed the shared `DrawingEngine` from landmark-driven coordinates.
  */
 function App() {
-  const { strokes, activeStroke, engine, syncToolSettings, canUndo, canRedo } = useDrawingState()
+  const {
+    strokes,
+    activeStroke,
+    engine,
+    syncToolSettings,
+    canUndo,
+    canRedo,
+    addRemoteStroke,
+    setStrokes,
+  } = useDrawingState()
   const canvasElRef = useRef<HTMLCanvasElement | null>(null)
   const lastAiGuessStageRef = useRef(0)
+  const aiGuessPendingRef = useRef(false)
+  const roomSocketRef = useRef<WebSocket | null>(null)
+  const reconnectTimerRef = useRef<number | null>(null)
+  const reconnectAttemptsRef = useRef(0)
+  const reconnectRoomRef = useRef<(code: string, name: string, avatar: string, spectator: boolean) => void>(
+    () => undefined,
+  )
+  const sentStrokeIdsRef = useRef<Set<string>>(new Set())
 
   const [color, setColor] = useState(DEFAULT_BRUSH_COLOR)
   const [brushSize, setBrushSize] = useState(DEFAULT_BRUSH_SIZE)
@@ -166,19 +552,79 @@ function App() {
   const [gestureEnabled, setGestureEnabled] = useState(true)
   const [instructionsOpen, setInstructionsOpen] = useState(false)
   const [screen, setScreen] = useState<'home' | 'game'>('home')
+  const [gameMode, setGameMode] = useState<'ai' | 'room'>('ai')
+  const [roomCode, setRoomCode] = useState<string | null>(null)
+  const [playerName, setPlayerName] = useState('You')
+  const [playerAvatar, setPlayerAvatar] = useState(AVATAR_OPTIONS[0]!.id)
+  const [aiSettings, setAiSettings] = useState<AiSettings>({
+    count: 1,
+    difficulty: 'medium',
+    canDraw: false,
+  })
+  const [aiPlayers, setAiPlayers] = useState<AiPlayer[]>(createAiPlayers(1))
+  const [roomPlayers, setRoomPlayers] = useState<RoomPlayer[]>([])
+  const [roomPlayerId, setRoomPlayerId] = useState<string | null>(null)
+  const [roomPhase, setRoomPhase] = useState<'lobby' | 'choosing' | 'drawing' | 'reveal' | 'ended'>('lobby')
+  const [roomSettings, setRoomSettings] = useState<RoomSettings>({
+    rounds: 3,
+    drawTime: ROUND_SECONDS,
+    aiDifficulty: 'medium',
+    aiCanDraw: false,
+    isPublic: false,
+    language: 'en',
+    wordDifficulty: 'medium',
+    customWordMode: 'disabled',
+    customWords: [],
+  })
+  const [currentRound, setCurrentRound] = useState(1)
+  const [totalRounds, setTotalRounds] = useState(3)
+  const [isDrawer, setIsDrawer] = useState(false)
+  const [roomStatus, setRoomStatus] = useState('Offline')
+  const [isSpectator, setIsSpectator] = useState(false)
+  const [wordChoices, setWordChoices] = useState<string[]>([])
+  const [choiceTimeLeft, setChoiceTimeLeft] = useState(0)
+  const [isChoosingWord, setIsChoosingWord] = useState(false)
   const [currentWord, setCurrentWord] = useState(WORD_OPTIONS[0]!)
   const [hasCorrectGuess, setHasCorrectGuess] = useState(false)
   const [timeLeft, setTimeLeft] = useState(ROUND_SECONDS)
   const [roundEnded, setRoundEnded] = useState(false)
   const [chatDraft, setChatDraft] = useState('')
+  const [theme, setTheme] = useState(() => localStorage.getItem('moodle-theme') || 'classic')
+  const [soundEnabled, setSoundEnabled] = useState(() => localStorage.getItem('moodle-sound') !== 'off')
+  const [localWins, setLocalWins] = useState(() => Number(localStorage.getItem('moodle-wins') || 0))
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
     { name: 'Moodle', text: 'Welcome to the drawing room.', role: 'system' },
-    { name: 'Pixel Pal', text: 'AI player ready. I will guess while you draw.', role: 'ai' },
+    { name: 'Pixel Pal', text: 'AI player ready. I will inspect the canvas while you draw.', role: 'ai' },
   ])
 
   const handleCanvasReady = useCallback((canvas: HTMLCanvasElement | null) => {
     canvasElRef.current = canvas
   }, [])
+
+  const playTone = useCallback(() => {
+    if (!soundEnabled) return
+    const AudioContextClass =
+      window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+    if (!AudioContextClass) return
+    const context = new AudioContextClass()
+    const oscillator = context.createOscillator()
+    const gain = context.createGain()
+    oscillator.frequency.value = 660
+    gain.gain.value = 0.03
+    oscillator.connect(gain)
+    gain.connect(context.destination)
+    oscillator.start()
+    oscillator.stop(context.currentTime + 0.12)
+  }, [soundEnabled])
+
+  useEffect(() => {
+    localStorage.setItem('moodle-theme', theme)
+    document.documentElement.dataset.theme = theme
+  }, [theme])
+
+  useEffect(() => {
+    localStorage.setItem('moodle-sound', soundEnabled ? 'on' : 'off')
+  }, [soundEnabled])
 
   const handleClear = useCallback(() => {
     if (!window.confirm('Are you sure you want to clear the entire canvas?')) {
@@ -187,11 +633,316 @@ function App() {
     engine.clear()
   }, [engine])
 
+  const closeRoomSocket = useCallback(() => {
+    if (reconnectTimerRef.current !== null) {
+      window.clearTimeout(reconnectTimerRef.current)
+      reconnectTimerRef.current = null
+    }
+    reconnectAttemptsRef.current = 0
+    const currentSocket = roomSocketRef.current
+    roomSocketRef.current = null
+    currentSocket?.close()
+    sentStrokeIdsRef.current.clear()
+    setIsDrawer(false)
+    setRoomPlayers([])
+    setRoomPlayerId(null)
+    setRoomPhase('lobby')
+    setIsSpectator(false)
+    setRoomStatus('Offline')
+  }, [])
+
+  const connectRoomSocket = useCallback(
+    (code: string, name: string, avatar: string, spectator = false) => {
+      const reconnectAttempt = reconnectAttemptsRef.current
+      closeRoomSocket()
+      reconnectAttemptsRef.current = reconnectAttempt
+      setRoomStatus('Connecting')
+      setIsSpectator(spectator)
+      const sessionId = getAnonymousSessionId()
+      const socket = new WebSocket(
+        `${ROOM_WS_URL}?room=${encodeURIComponent(code)}&name=${encodeURIComponent(name)}&avatar=${encodeURIComponent(avatar)}&session=${encodeURIComponent(sessionId)}&spectator=${spectator ? '1' : '0'}`,
+      )
+      roomSocketRef.current = socket
+
+      socket.addEventListener('open', () => {
+        reconnectAttemptsRef.current = 0
+        setRoomStatus('Connected')
+      })
+
+      socket.addEventListener('message', (event) => {
+        const message = JSON.parse(event.data)
+
+        if (message.type === 'room_state') {
+          setRoomCode(message.roomCode)
+          setRoomPlayerId(message.playerId || null)
+          setIsSpectator(Boolean(message.isSpectator))
+          setRoomPhase(message.phase || 'lobby')
+          setRoomSettings(message.settings || {
+            rounds: 3,
+            drawTime: ROUND_SECONDS,
+            aiDifficulty: 'medium',
+            aiCanDraw: false,
+            isPublic: false,
+            language: 'en',
+            wordDifficulty: 'medium',
+            customWordMode: 'disabled',
+            customWords: [],
+          })
+          setIsDrawer(Boolean(message.isDrawer))
+          setRoomPlayers(message.players || [])
+          setTimeLeft(message.timeLeft ?? ROUND_SECONDS)
+          setCurrentWord(
+            message.word ||
+            message.wordHint ||
+            (message.wordLength ? '_'.repeat(message.wordLength) : 'LOBBY'),
+          )
+          setIsChoosingWord(Boolean(message.choosingWord))
+          setWordChoices(message.wordOptions || [])
+          setChoiceTimeLeft(message.choiceTimeLeft || 0)
+          setCurrentRound(message.round || 1)
+          setTotalRounds(message.totalRounds || 3)
+          setRoundEnded(message.phase === 'reveal' || message.phase === 'ended')
+          setStrokes(message.strokes || [])
+          sentStrokeIdsRef.current = new Set((message.strokes || []).map((stroke: Stroke) => stroke.id))
+          return
+        }
+
+        if (message.type === 'timer') {
+          setTimeLeft(message.timeLeft)
+          if (message.wordHint) {
+            setCurrentWord((current) => current.includes('_') ? message.wordHint : current)
+          }
+          return
+        }
+
+        if (message.type === 'word_choice_tick') {
+          setChoiceTimeLeft(message.choiceTimeLeft)
+          return
+        }
+
+        if (message.type === 'word_chosen') {
+          setRoomPhase('drawing')
+          setRoundEnded(false)
+          setIsChoosingWord(false)
+          setWordChoices([])
+          setChoiceTimeLeft(0)
+          setChatMessages((current) => [
+            ...current,
+            {
+              name: 'Moodle',
+              text: message.automatic ? 'Time ran out, so Moodle picked a word.' : 'The drawer picked a word.',
+              role: 'system',
+            },
+          ])
+          return
+        }
+
+        if (message.type === 'drawing_stroke') {
+          addRemoteStroke(message.stroke)
+          return
+        }
+
+        if (message.type === 'chat_message') {
+          setChatMessages((current) => [
+            ...current,
+            { name: message.playerName || 'Player', text: message.text, role: message.role || 'player' },
+          ])
+          return
+        }
+
+        if (message.type === 'system_message') {
+          setChatMessages((current) => [
+            ...current,
+            { name: 'Moodle', text: message.message || 'Room update.', role: 'system' },
+          ])
+          return
+        }
+
+        if (message.type === 'correct_guess') {
+          playTone()
+          setRoomPlayers(message.players || [])
+          setChatMessages((current) => [
+            ...current,
+            {
+              name: 'Moodle',
+              text: `${message.playerName} guessed correctly.`,
+              role: 'system',
+              correct: true,
+            },
+          ])
+          return
+        }
+
+        if (message.type === 'round_reveal') {
+          setRoomPhase('reveal')
+          setCurrentWord(message.word)
+          setRoomPlayers(message.players || [])
+          setRoundEnded(true)
+          setChatMessages((current) => [
+            ...current,
+            {
+              name: 'Moodle',
+              text: `${message.reason} The word was ${message.word}.`,
+              role: 'system',
+            },
+          ])
+          return
+        }
+
+        if (message.type === 'game_ended') {
+          playTone()
+          setRoomPhase('ended')
+          setRoomPlayers(message.players || [])
+          setRoundEnded(true)
+          const winner = message.players?.[0]?.name
+          if (winner === playerName) {
+            setLocalWins((current) => {
+              const next = current + 1
+              localStorage.setItem('moodle-wins', String(next))
+              return next
+            })
+          }
+          setChatMessages((current) => [
+            ...current,
+            {
+              name: 'Moodle',
+              text: winner ? `Game ended. ${winner} wins.` : 'Game ended.',
+              role: 'system',
+              correct: true,
+            },
+          ])
+          return
+        }
+
+        if (message.type === 'player_joined' || message.type === 'player_left') {
+          setRoomPlayers(message.players || [])
+          setChatMessages((current) => [
+            ...current,
+            {
+              name: 'Moodle',
+              text:
+                message.type === 'player_joined'
+                  ? `${message.player.name} joined the room.`
+                  : `${message.playerName || 'A player'} left the room.`,
+              role: 'system',
+            },
+          ])
+          return
+        }
+
+        if (message.type === 'error') {
+          setChatMessages((current) => [
+            ...current,
+            { name: 'Moodle', text: message.message || 'Room error.', role: 'system' },
+          ])
+          return
+        }
+
+        if (message.type === 'join_error') {
+          setRoomStatus('Error')
+          setChatMessages((current) => [
+            ...current,
+            { name: 'Moodle', text: message.message || 'Could not join room.', role: 'system' },
+          ])
+        }
+      })
+
+      socket.addEventListener('close', () => {
+        if (roomSocketRef.current !== socket) return
+        setRoomStatus('Reconnecting')
+        reconnectAttemptsRef.current += 1
+        const delay = Math.min(10_000, 750 * 2 ** (reconnectAttemptsRef.current - 1))
+        reconnectTimerRef.current = window.setTimeout(() => {
+          reconnectRoomRef.current(code, name, avatar, spectator)
+        }, delay)
+      })
+    },
+    [addRemoteStroke, closeRoomSocket, playTone, playerName, setStrokes],
+  )
+  reconnectRoomRef.current = connectRoomSocket
+
+  useEffect(() => closeRoomSocket, [closeRoomSocket])
+
+  const openAiGame = useCallback((name: string, avatar: string, settings: AiSettings) => {
+    closeRoomSocket()
+    setPlayerName(name)
+    setPlayerAvatar(avatar)
+    setAiSettings(settings)
+    setAiPlayers(createAiPlayers(settings.count))
+    setHasCorrectGuess(false)
+    setRoundEnded(false)
+    setTimeLeft(ROUND_SECONDS)
+    lastAiGuessStageRef.current = 0
+    aiGuessPendingRef.current = false
+    setGameMode('ai')
+    setRoomCode(null)
+    setScreen('game')
+    setChatMessages((current) => [
+      ...current,
+      {
+        name: 'Moodle',
+        text: `AI game started with ${settings.count} AI player${settings.count === 1 ? '' : 's'} on ${settings.difficulty}.`,
+        role: 'system',
+      },
+    ])
+  }, [closeRoomSocket])
+
+  const openRoomGame = useCallback(async (name: string, avatar: string) => {
+    try {
+      const code = await createServerRoom()
+      setPlayerName(name)
+      setPlayerAvatar(avatar)
+      setGameMode('room')
+      setRoomCode(code)
+      setScreen('game')
+      setChatMessages((current) => [
+        ...current,
+        {
+          name: 'Moodle',
+          text: `Room ${code} created. Share this code with friends.`,
+          role: 'system',
+        },
+      ])
+      connectRoomSocket(code, name, avatar)
+    } catch (error) {
+      setChatMessages((current) => [
+        ...current,
+        {
+          name: 'Moodle',
+          text: error instanceof Error ? error.message : 'Could not create room.',
+          role: 'system',
+        },
+      ])
+    }
+  }, [connectRoomSocket])
+
+  const joinRoomGame = useCallback((code: string, name: string, avatar: string, spectator = false) => {
+    setPlayerName(name)
+    setPlayerAvatar(avatar)
+    setGameMode('room')
+    setRoomCode(code)
+    setScreen('game')
+    setChatMessages((current) => [
+      ...current,
+      {
+        name: 'Moodle',
+          text: spectator ? `Watching room ${code}.` : `Joined room ${code}. Waiting for friends to connect.`,
+          role: 'system',
+        },
+      ])
+    connectRoomSocket(code, name, avatar, spectator)
+  }, [connectRoomSocket])
+
   const handleChatSubmit = useCallback(
     (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault()
       const message = chatDraft.trim()
       if (!message) return
+      if (gameMode === 'room' && roomSocketRef.current?.readyState === WebSocket.OPEN) {
+        roomSocketRef.current.send(JSON.stringify({ type: 'chat_guess', text: message }))
+        setChatDraft('')
+        return
+      }
       const isCorrectGuess = !roundEnded && normalizeGuess(message) === normalizeGuess(currentWord)
       setChatMessages((current) => [
         ...current,
@@ -213,7 +964,7 @@ function App() {
       }
       setChatDraft('')
     },
-    [chatDraft, currentWord, hasCorrectGuess, roundEnded],
+    [chatDraft, currentWord, gameMode, hasCorrectGuess, roundEnded],
   )
 
   const handleWordChange = useCallback(
@@ -223,6 +974,7 @@ function App() {
       setRoundEnded(false)
       setTimeLeft(ROUND_SECONDS)
       lastAiGuessStageRef.current = 0
+      aiGuessPendingRef.current = false
       engine.clear()
       setChatMessages((current) => [
         ...current,
@@ -241,12 +993,116 @@ function App() {
     [engine],
   )
 
+  const chooseRoomWord = useCallback((word: string) => {
+    if (roomSocketRef.current?.readyState !== WebSocket.OPEN) return
+    roomSocketRef.current.send(JSON.stringify({ type: 'choose_word', word }))
+    setIsChoosingWord(false)
+    setWordChoices([])
+  }, [])
+
+  const sendRoomMessage = useCallback((payload: Record<string, unknown>) => {
+    if (roomSocketRef.current?.readyState !== WebSocket.OPEN) return
+    roomSocketRef.current.send(JSON.stringify(payload))
+  }, [])
+
+  const updateRoomSettings = useCallback(
+    (nextSettings: RoomSettings) => {
+      setRoomSettings(nextSettings)
+      sendRoomMessage({ type: 'update_settings', settings: nextSettings })
+    },
+    [sendRoomMessage],
+  )
+
+  const startRoomGame = useCallback(() => {
+    sendRoomMessage({ type: 'start_game' })
+  }, [sendRoomMessage])
+
+  const addRoomAiPlayer = useCallback(() => {
+    sendRoomMessage({ type: 'add_ai' })
+  }, [sendRoomMessage])
+
+  const removeRoomAiPlayer = useCallback(
+    (playerId: string) => {
+      sendRoomMessage({ type: 'remove_ai', playerId })
+    },
+    [sendRoomMessage],
+  )
+
+  const kickRoomPlayer = useCallback(
+    (playerId: string) => {
+      sendRoomMessage({ type: 'kick_player', playerId })
+    },
+    [sendRoomMessage],
+  )
+
+  const reportRoomPlayer = useCallback(
+    (playerId: string) => {
+      sendRoomMessage({ type: 'report_player', playerId })
+    },
+    [sendRoomMessage],
+  )
+
+  const voteKickRoomPlayer = useCallback(
+    (playerId: string) => {
+      sendRoomMessage({ type: 'vote_kick', playerId })
+    },
+    [sendRoomMessage],
+  )
+
+  const copyShareLink = useCallback(
+    (spectate = false) => {
+      if (!roomCode) return
+      const url = new URL(window.location.href)
+      url.search = ''
+      url.searchParams.set('room', roomCode)
+      if (spectate) url.searchParams.set('spectate', '1')
+      void navigator.clipboard?.writeText(url.toString())
+      setChatMessages((current) => [
+        ...current,
+        { name: 'Moodle', text: spectate ? 'Spectator link copied.' : 'Room link copied.', role: 'system' },
+      ])
+    },
+    [roomCode],
+  )
+
+  const saveDrawing = useCallback(() => {
+    const canvas = canvasElRef.current
+    if (!canvas) return
+    const link = document.createElement('a')
+    link.href = canvas.toDataURL('image/png')
+    link.download = `moodle-${Date.now()}.png`
+    link.click()
+  }, [])
+
+  const replayDrawing = useCallback(() => {
+    const history = [...strokes]
+    if (history.length === 0) return
+    setStrokes([])
+    history.forEach((stroke, index) => {
+      window.setTimeout(() => addRemoteStroke(stroke), index * 450)
+    })
+  }, [addRemoteStroke, setStrokes, strokes])
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      if (target?.tagName === 'INPUT' || target?.tagName === 'SELECT' || target?.tagName === 'TEXTAREA') return
+      if (event.key.toLowerCase() === 'b') setMode('draw')
+      if (event.key.toLowerCase() === 'e') setMode('erase')
+      if (event.key.toLowerCase() === 'z') engine.undo()
+      if (event.key.toLowerCase() === 'y') engine.redo()
+      if (event.key.toLowerCase() === 's') saveDrawing()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [engine, saveDrawing])
+
   const tracking = useMediaPipeHandTracking(gestureEnabled && screen === 'game')
   const { status, preview } = useGestureInputController({
     frame: tracking.frame,
     canvas: canvasElRef.current,
     engine,
-    gestureEnabled: gestureEnabled && screen === 'game',
+    gestureEnabled: gestureEnabled && screen === 'game' && (gameMode !== 'room' || (isDrawer && roomPhase === 'drawing')),
     setMode,
   })
 
@@ -255,7 +1111,20 @@ function App() {
   }, [color, brushSize, mode, syncToolSettings])
 
   useEffect(() => {
+    if (gameMode !== 'room' || !isDrawer || roomPhase !== 'drawing') return
+    const socket = roomSocketRef.current
+    if (!socket || socket.readyState !== WebSocket.OPEN) return
+
+    for (const stroke of strokes) {
+      if (sentStrokeIdsRef.current.has(stroke.id)) continue
+      sentStrokeIdsRef.current.add(stroke.id)
+      socket.send(JSON.stringify({ type: 'drawing_stroke', stroke }))
+    }
+  }, [gameMode, isDrawer, roomPhase, strokes])
+
+  useEffect(() => {
     if (screen !== 'game' || hasCorrectGuess || roundEnded) return
+    if (gameMode === 'room') return
 
     const timerId = window.setInterval(() => {
       setTimeLeft((current) => {
@@ -278,11 +1147,15 @@ function App() {
     }, 1000)
 
     return () => window.clearInterval(timerId)
-  }, [currentWord, hasCorrectGuess, roundEnded, screen])
+  }, [currentWord, gameMode, hasCorrectGuess, roundEnded, screen])
 
   useEffect(() => {
     if (screen !== 'game') return
+    if (gameMode === 'room') return
     if (hasCorrectGuess || roundEnded) return
+    if (aiGuessPendingRef.current) return
+    const nextAiPlayer = aiPlayers.find((player) => !player.guessed)
+    if (!nextAiPlayer) return
 
     const strokePointCount = strokes.reduce((total, stroke) => total + stroke.points.length, 0)
     const activePointCount = activeStroke?.points.length ?? 0
@@ -293,38 +1166,101 @@ function App() {
       return
     }
 
-    const stage = Math.min(4, Math.floor(totalPoints / 28) + Math.floor(strokes.length / 3))
+    const difficulty = AI_DIFFICULTY_CONFIG[aiSettings.difficulty]
+    const stage = Math.min(4, Math.floor(totalPoints / difficulty.pointStep) + Math.floor(strokes.length / 3))
     if (stage <= 0 || stage <= lastAiGuessStageRef.current) return
 
+    const canvas = canvasElRef.current
+    if (!canvas) return
+
     lastAiGuessStageRef.current = stage
-    const message = getAiGuessMessage(stage, totalPoints, strokes.length, currentWord)
+    aiGuessPendingRef.current = true
+
     window.setTimeout(() => {
-      setChatMessages((current) => [
-        ...current,
-        {
-          name: 'Pixel Pal',
-          text: message,
-          role: 'ai',
-        },
-      ])
-    }, 650)
-  }, [activeStroke, currentWord, hasCorrectGuess, roundEnded, screen, strokes])
+      const imageDataUrl = canvas.toDataURL('image/png')
+      requestPixelPalGuess(imageDataUrl)
+        .then((guess) => {
+          const shouldGuessCorrectly = Math.random() <= difficulty.accuracy
+          const fallbackGuess = shouldGuessCorrectly ? guess || currentWord : pickWrongAiGuess(currentWord)
+          const isCorrectAiGuess = normalizeGuess(fallbackGuess) === normalizeGuess(currentWord)
+          setAiPlayers((current) =>
+            current.map((player) =>
+              player.id === nextAiPlayer.id
+                ? {
+                    ...player,
+                    guessed: isCorrectAiGuess,
+                    score: isCorrectAiGuess ? player.score + Math.max(10, timeLeft * 10) : player.score,
+                  }
+                : player,
+            ),
+          )
+          setChatMessages((current) => [
+            ...current,
+            {
+              name: nextAiPlayer.name,
+              text: fallbackGuess,
+              role: 'ai',
+              correct: isCorrectAiGuess,
+            },
+          ])
+          if (isCorrectAiGuess) {
+            setChatMessages((current) => [
+              ...current,
+              {
+                name: 'Moodle',
+                text: `${nextAiPlayer.name} guessed correctly.`,
+                role: 'system',
+                correct: true,
+              },
+            ])
+          }
+        })
+        .catch((error) => {
+          setChatMessages((current) => [
+            ...current,
+            {
+              name: nextAiPlayer.name,
+              text: error instanceof Error ? error.message : 'I could not reach the AI service.',
+              role: 'ai',
+            },
+          ])
+        })
+        .finally(() => {
+          aiGuessPendingRef.current = false
+        })
+    }, difficulty.delayMs + Math.floor(Math.random() * 900))
+  }, [activeStroke, aiPlayers, aiSettings.difficulty, currentWord, gameMode, hasCorrectGuess, roundEnded, screen, strokes, timeLeft])
+
+  const isRoomHost = gameMode === 'room' && roomPlayers.some((player) => player.id === roomPlayerId && player.isHost)
+  const canStartRoom = roomPlayers.length >= 2 && (roomPhase === 'lobby' || roomPhase === 'ended')
 
   return (
     <>
       <PixelBackdrop />
-      {screen === 'home' && <HomeScreen onStart={() => setScreen('game')} />}
+      {screen === 'home' && (
+        <HomeScreen
+          onCreateRoom={openRoomGame}
+          onJoinRoom={joinRoomGame}
+          onPlayAi={openAiGame}
+          activeRoomCode={roomCode}
+        />
+      )}
       {screen === 'game' && (
       <div className="app">
         <header className="app__header">
           <div>
             <p className="app__eyebrow">Drawing workspace</p>
             <h1 className="app__title">Moodle</h1>
+            <div className="mode-chip">
+              {gameMode === 'room' && roomCode
+                ? `ROOM ${roomCode} · ${roomStatus}`
+                : `AI · ${aiPlayers.length} · ${aiSettings.difficulty.toUpperCase()}${aiSettings.canDraw ? ' · DRAW ON' : ''}`}
+            </div>
           </div>
           <div className="header-stats">
             <div className="round-box" aria-label="Round">
               <span className="r-lbl">ROUND</span>
-              <span className="r-num">1 / 3</span>
+              <span className="r-num">{gameMode === 'room' ? `${currentRound} / ${totalRounds}` : '1 / 3'}</span>
             </div>
             <div className={`timer-box${timeLeft <= 10 && !roundEnded ? ' timer-box--danger' : ''}`} aria-label="Timer">
               <span className="r-lbl">TIME</span>
@@ -349,48 +1285,295 @@ function App() {
               </span>
             ))}
           </div>
-          <label className="word-picker">
-            <span>WORD</span>
-            <select
-              value={currentWord}
-              onChange={(event) => handleWordChange(event.target.value)}
-              aria-label="Pick drawing word"
-            >
-              {WORD_OPTIONS.map((word) => (
-                <option key={word} value={word}>
-                  {word}
-                </option>
-              ))}
-            </select>
-          </label>
+          {gameMode === 'ai' && (
+            <label className="word-picker">
+              <span>WORD</span>
+              <select
+                value={currentWord}
+                onChange={(event) => handleWordChange(event.target.value)}
+                aria-label="Pick drawing word"
+              >
+                {WORD_OPTIONS.map((word) => (
+                  <option key={word} value={word}>
+                    {word}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
         </section>
+        {gameMode === 'room' && isDrawer && isChoosingWord && wordChoices.length > 0 && (
+          <section className="word-choice-panel" aria-label="Choose word">
+            <span>Pick a word in {choiceTimeLeft}s</span>
+            <div className="word-choice-panel__options">
+              {wordChoices.map((word) => (
+                <button type="button" key={word} onClick={() => chooseRoomWord(word)}>
+                  {word}
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
+        {gameMode === 'room' && (roomPhase === 'lobby' || roomPhase === 'ended') && (
+          <section className="lobby-panel" aria-label="Room lobby">
+            <div>
+              <div className="px-panel-title">ROOM {roomCode}</div>
+              <p>
+                {isRoomHost
+                  ? 'Configure the room, add AI players, then start.'
+                  : 'Waiting for the host to start the game.'}
+              </p>
+            </div>
+            <div className="lobby-settings">
+              <label>
+                ROUNDS
+                <select
+                  value={roomSettings.rounds}
+                  onChange={(event) =>
+                    updateRoomSettings({ ...roomSettings, rounds: Number(event.target.value) })
+                  }
+                  disabled={!isRoomHost}
+                >
+                  {[1, 2, 3, 4, 5, 6].map((rounds) => (
+                    <option key={rounds} value={rounds}>
+                      {rounds}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                DRAW TIME
+                <select
+                  value={roomSettings.drawTime}
+                  onChange={(event) =>
+                    updateRoomSettings({ ...roomSettings, drawTime: Number(event.target.value) })
+                  }
+                  disabled={!isRoomHost}
+                >
+                  {[30, 45, 60, 90, 120].map((seconds) => (
+                    <option key={seconds} value={seconds}>
+                      {seconds}s
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                AI LEVEL
+                <select
+                  value={roomSettings.aiDifficulty}
+                  onChange={(event) =>
+                    updateRoomSettings({ ...roomSettings, aiDifficulty: event.target.value as AiDifficulty })
+                  }
+                  disabled={!isRoomHost}
+                >
+                  <option value="easy">Easy</option>
+                  <option value="medium">Medium</option>
+                  <option value="hard">Hard</option>
+                </select>
+              </label>
+              <label className="lobby-settings__toggle">
+                <input
+                  type="checkbox"
+                  checked={roomSettings.aiCanDraw}
+                  onChange={(event) =>
+                    updateRoomSettings({ ...roomSettings, aiCanDraw: event.target.checked })
+                  }
+                  disabled={!isRoomHost}
+                />
+                AI DRAW
+              </label>
+              <label className="lobby-settings__toggle">
+                <input
+                  type="checkbox"
+                  checked={roomSettings.isPublic}
+                  onChange={(event) =>
+                    updateRoomSettings({ ...roomSettings, isPublic: event.target.checked })
+                  }
+                  disabled={!isRoomHost}
+                />
+                PUBLIC
+              </label>
+              <label>
+                LANGUAGE
+                <select
+                  value={roomSettings.language}
+                  onChange={(event) =>
+                    updateRoomSettings({ ...roomSettings, language: event.target.value as 'en' | 'es' })
+                  }
+                  disabled={!isRoomHost}
+                >
+                  <option value="en">English</option>
+                  <option value="es">Spanish</option>
+                </select>
+              </label>
+              <label>
+                WORD LEVEL
+                <select
+                  value={roomSettings.wordDifficulty}
+                  onChange={(event) =>
+                    updateRoomSettings({
+                      ...roomSettings,
+                      wordDifficulty: event.target.value as 'easy' | 'medium' | 'hard',
+                    })
+                  }
+                  disabled={!isRoomHost}
+                >
+                  <option value="easy">Easy</option>
+                  <option value="medium">Medium</option>
+                  <option value="hard">Hard</option>
+                </select>
+              </label>
+              <label>
+                CUSTOM
+                <select
+                  value={roomSettings.customWordMode}
+                  onChange={(event) =>
+                    updateRoomSettings({
+                      ...roomSettings,
+                      customWordMode: event.target.value as 'disabled' | 'mixed' | 'only',
+                    })
+                  }
+                  disabled={!isRoomHost}
+                >
+                  <option value="disabled">Off</option>
+                  <option value="mixed">Mixed</option>
+                  <option value="only">Only</option>
+                </select>
+              </label>
+              <label className="lobby-settings__wide">
+                CUSTOM WORDS
+                <input
+                  value={roomSettings.customWords.join(', ')}
+                  onChange={(event) =>
+                    updateRoomSettings({
+                      ...roomSettings,
+                      customWords: event.target.value
+                        .split(',')
+                        .map((word) => word.trim().toUpperCase())
+                        .filter(Boolean),
+                    })
+                  }
+                  placeholder="APPLE, CLOUD, CAR"
+                  disabled={!isRoomHost}
+                />
+              </label>
+            </div>
+            {isRoomHost && (
+              <div className="lobby-actions">
+                <button type="button" className="px-btn" onClick={() => copyShareLink(false)}>
+                  LINK
+                </button>
+                <button type="button" className="px-btn" onClick={() => copyShareLink(true)}>
+                  WATCH LINK
+                </button>
+                <button type="button" className="px-btn" onClick={addRoomAiPlayer} disabled={roomPlayers.length >= 8}>
+                  ADD AI
+                </button>
+                <button type="button" className="px-btn px-btn--primary" onClick={startRoomGame} disabled={!canStartRoom}>
+                  START
+                </button>
+              </div>
+            )}
+          </section>
+        )}
+        {gameMode === 'room' && (roomPhase === 'reveal' || roomPhase === 'ended') && (
+          <section className="transition-panel" aria-label="Round summary">
+            <div>
+              <div className="px-panel-title">{roomPhase === 'ended' ? 'FINAL RANKING' : 'ROUND OVER'}</div>
+              <p>{roomPhase === 'ended' ? 'Game complete.' : `The word was ${currentWord}.`}</p>
+            </div>
+            <ol>
+              {[...roomPlayers]
+                .filter((player) => !player.isSpectator)
+                .sort((a, b) => b.score - a.score)
+                .slice(0, 5)
+                .map((player) => (
+                  <li key={player.id}>
+                    <span>{player.name}{player.isAi ? ' AI' : ''}</span>
+                    <strong>{player.score}</strong>
+                  </li>
+                ))}
+            </ol>
+          </section>
+        )}
 
         <main className="game-grid">
           <aside className="game-side px-panel" aria-label="Players">
             <div className="px-panel-title">PLAYERS</div>
             <div className="side-list">
-              <div className="gp-card drawing">
-                <span className="gp-av">🐱</span>
-                <span className="gp-info">
-                  <span className="gp-nm">You</span>
-                  <span className="gp-sc">Drawing</span>
-                </span>
-                <span className="draw-ind">✎</span>
-              </div>
-              <div className="gp-card guessed">
-                <span className="gp-av">AI</span>
-                <span className="gp-info">
-                  <span className="gp-nm">Pixel Pal</span>
-                  <span className="gp-sc">AI guessing</span>
-                </span>
-              </div>
-              <div className="gp-card">
-                <span className="gp-av">⭐</span>
-                <span className="gp-info">
-                  <span className="gp-nm">Sketch Fan</span>
-                  <span className="gp-sc">180</span>
-                </span>
-              </div>
+              {gameMode === 'room'
+                ? roomPlayers.map((player) => (
+                    <div
+                      className={`gp-card${player.isDrawer ? ' drawing' : ''}${player.guessed ? ' guessed' : ''}`}
+                      key={player.id}
+                    >
+                      <span className="gp-av">{player.isDrawer ? '✎' : player.guessed ? '✓' : avatarIcon(player.avatar)}</span>
+                      <span className="gp-info">
+                        <span className="gp-nm">
+                          {player.name}{player.isAi ? ' AI' : ''}{player.isSpectator ? ' WATCH' : ''}{player.isHost ? ' HOST' : ''}
+                        </span>
+                        <span className="gp-sc">
+                          {player.disconnected ? 'Disconnected' : player.isSpectator ? 'Spectating' : player.isDrawer ? 'Drawing' : `${player.score} pts`}
+                        </span>
+                      </span>
+                      {player.isDrawer && <span className="draw-ind">✎</span>}
+                      {player.id !== roomPlayerId && (
+                        <span className="gp-actions">
+                          {isRoomHost && (roomPhase === 'lobby' || roomPhase === 'ended') && (
+                            <button
+                              type="button"
+                              className="gp-remove"
+                              onClick={() => (player.isAi ? removeRoomAiPlayer(player.id) : kickRoomPlayer(player.id))}
+                              aria-label={`Remove ${player.name}`}
+                            >
+                              ×
+                            </button>
+                          )}
+                          {!player.isAi && (
+                            <>
+                              <button
+                                type="button"
+                                className="gp-report"
+                                onClick={() => voteKickRoomPlayer(player.id)}
+                                aria-label={`Vote kick ${player.name}`}
+                              >
+                                V
+                              </button>
+                              <button
+                                type="button"
+                                className="gp-report"
+                                onClick={() => reportRoomPlayer(player.id)}
+                                aria-label={`Report ${player.name}`}
+                              >
+                                !
+                              </button>
+                            </>
+                          )}
+                        </span>
+                      )}
+                    </div>
+                  ))
+                : (
+                  <>
+                    <div className="gp-card drawing">
+                      <span className="gp-av">{avatarIcon(playerAvatar)}</span>
+                      <span className="gp-info">
+                        <span className="gp-nm">{playerName}</span>
+                        <span className="gp-sc">Drawing</span>
+                      </span>
+                      <span className="draw-ind">✎</span>
+                    </div>
+                    {aiPlayers.map((player) => (
+                      <div className={`gp-card${player.guessed ? ' guessed' : ''}`} key={player.id}>
+                        <span className="gp-av">{player.guessed ? '✓' : avatarIcon(player.avatar)}</span>
+                        <span className="gp-info">
+                          <span className="gp-nm">{player.name} AI</span>
+                          <span className="gp-sc">{player.guessed ? `${player.score} pts` : 'Guessing'}</span>
+                        </span>
+                      </div>
+                    ))}
+                  </>
+                )}
             </div>
           </aside>
 
@@ -408,6 +1591,31 @@ function App() {
               canUndo={canUndo}
               canRedo={canRedo}
             />
+            <div className="utility-bar" aria-label="Game utilities">
+              <button type="button" onClick={saveDrawing}>
+                SAVE
+              </button>
+              <button type="button" onClick={replayDrawing} disabled={strokes.length === 0}>
+                REPLAY
+              </button>
+              <label>
+                THEME
+                <select value={theme} onChange={(event) => setTheme(event.target.value)}>
+                  <option value="classic">Classic</option>
+                  <option value="night">Night</option>
+                  <option value="forest">Forest</option>
+                </select>
+              </label>
+              <label className="utility-bar__toggle">
+                <input
+                  type="checkbox"
+                  checked={soundEnabled}
+                  onChange={(event) => setSoundEnabled(event.target.checked)}
+                />
+                SOUND
+              </label>
+              <span>WINS {localWins}</span>
+            </div>
 
             <div className="canvas-shell">
               <DrawingCanvas
@@ -415,8 +1623,8 @@ function App() {
                 activeStroke={activeStroke}
                 engine={engine}
                 toolMode={mode}
-                pointerEnabled={!gestureEnabled || !status.handDetected}
-                cursorOverride={gestureEnabled ? preview : null}
+                pointerEnabled={gameMode === 'room' ? isDrawer && roomPhase === 'drawing' : !gestureEnabled || !status.handDetected}
+                cursorOverride={gameMode === 'room' && !isDrawer ? null : gestureEnabled ? preview : null}
                 onCanvasReady={handleCanvasReady}
               />
               <span className="cc tl" aria-hidden />
@@ -475,10 +1683,11 @@ function App() {
                 className="chat-input"
                 value={chatDraft}
                 onChange={(event) => setChatDraft(event.target.value)}
-                placeholder="Type guess"
+                placeholder={gameMode === 'room' && isDrawer ? 'Drawer cannot guess' : 'Type guess'}
                 aria-label="Chat message"
+                disabled={gameMode === 'room' && (isDrawer || roomPhase !== 'drawing')}
               />
-              <button className="chat-send" type="submit">
+              <button className="chat-send" type="submit" disabled={gameMode === 'room' && (isDrawer || roomPhase !== 'drawing')}>
                 SEND
               </button>
             </form>

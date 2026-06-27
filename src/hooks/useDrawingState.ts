@@ -29,6 +29,8 @@ type Action =
   | { type: 'UNDO' }
   | { type: 'REDO' }
   | { type: 'CLEAR' }
+  | { type: 'ADD_REMOTE_STROKE'; stroke: Stroke }
+  | { type: 'SET_STROKES'; strokes: Stroke[] }
 
 function modelReducer(state: ModelState, action: Action): ModelState {
   switch (action.type) {
@@ -95,6 +97,16 @@ function modelReducer(state: ModelState, action: Action): ModelState {
     }
     case 'CLEAR':
       return { strokes: [], activeStroke: null, redoStack: [] }
+    case 'ADD_REMOTE_STROKE':
+      if (state.strokes.some((stroke) => stroke.id === action.stroke.id)) return state
+      return {
+        ...state,
+        strokes: [...state.strokes, action.stroke],
+        activeStroke: null,
+        redoStack: [],
+      }
+    case 'SET_STROKES':
+      return { strokes: action.strokes, activeStroke: null, redoStack: [] }
     default:
       return state
   }
@@ -161,6 +173,14 @@ export function useDrawingState() {
     dispatch({ type: 'CLEAR' })
   }, [])
 
+  const addRemoteStroke = useCallback((stroke: Stroke) => {
+    dispatch({ type: 'ADD_REMOTE_STROKE', stroke })
+  }, [])
+
+  const setStrokes = useCallback((strokes: Stroke[]) => {
+    dispatch({ type: 'SET_STROKES', strokes })
+  }, [])
+
   const engine: DrawingEngine = useMemo(
     () => ({
       startStroke,
@@ -184,5 +204,7 @@ export function useDrawingState() {
     canRedo: model.redoStack.length > 0,
     engine,
     syncToolSettings,
+    addRemoteStroke,
+    setStrokes,
   }
 }
