@@ -32,6 +32,7 @@ const WS_MAGIC = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
 const DEFAULT_ROOM_SETTINGS = {
   rounds: 3,
   drawTime: ROUND_SECONDS,
+  maxPlayers: MAX_PLAYERS,
   aiDifficulty: 'medium',
   aiCanDraw: false,
   isPublic: false,
@@ -208,6 +209,7 @@ function createRoom() {
     round: 1,
     timeLeft: ROUND_SECONDS,
     guessedPlayerIds: new Set(),
+    turnPoints: new Map(),
     timerId: null,
     revealTimerId: null,
     cleanupTimerId: null,
@@ -296,7 +298,7 @@ function publicRoomList() {
     .map((room) => ({
       code: room.code,
       playerCount: [...room.players.values()].filter((player) => !player.isSpectator && !player.disconnected).length,
-      maxPlayers: MAX_PLAYERS,
+      maxPlayers: room.settings.maxPlayers,
       phase: room.phase,
       rounds: room.settings.rounds,
       drawTime: room.settings.drawTime,
@@ -322,7 +324,7 @@ function validateJoin(room, name) {
     return { ok: false, message: 'Username must be 3-20 characters.' }
   }
   const activePlayerCount = [...room.players.values()].filter((player) => !player.isSpectator).length
-  if (activePlayerCount >= MAX_PLAYERS) {
+  if (activePlayerCount >= room.settings.maxPlayers) {
     return { ok: false, message: 'Room is full.' }
   }
   const duplicate = [...room.players.values()].some(
@@ -541,6 +543,7 @@ function startWordChoice(room) {
   room.timeLeft = room.settings.drawTime
   room.strokes = []
   room.guessedPlayerIds.clear()
+  room.turnPoints.clear()
   room.phase = 'choosing'
 
   broadcastRoomState(room)
@@ -597,13 +600,18 @@ function endRound(room, reason) {
   room.phase = 'reveal'
   const drawer = room.players.get(room.drawerId)
   if (drawer) {
-    drawer.score += room.guessedPlayerIds.size * 20
+    const drawerPoints = room.guessedPlayerIds.size * 20
+    drawer.score += drawerPoints
+    room.turnPoints.set(drawer.id, (room.turnPoints.get(drawer.id) || 0) + drawerPoints)
   }
+  const nextDrawerId = room.turnOrder[(room.turnIndex + 1) % Math.max(1, room.turnOrder.length)]
   broadcast(room, {
     type: 'round_reveal',
     word: room.secretWord,
     reason,
     players: publicPlayers(room),
+    pointsEarned: Object.fromEntries(room.turnPoints),
+    nextDrawerName: room.players.get(nextDrawerId)?.name || '',
   })
   broadcastRoomState(room)
   room.revealTimerId = setTimeout(() => {
@@ -696,6 +704,7 @@ function endGame(room) {
   room.wordLength = 0
   room.strokes = []
   room.guessedPlayerIds.clear()
+  room.turnPoints.clear()
   broadcast(room, {
     type: 'game_ended',
     players: rankedPlayers,
@@ -713,6 +722,7 @@ function updateRoomSettings(room, settings) {
   room.settings = {
     rounds: clampNumber(settings.rounds, 1, 8, room.settings.rounds),
     drawTime: clampNumber(settings.drawTime, 20, 120, room.settings.drawTime),
+    maxPlayers: clampNumber(settings.maxPlayers, 2, MAX_PLAYERS, room.settings.maxPlayers),
     aiDifficulty: AI_DIFFICULTY[settings.aiDifficulty] ? settings.aiDifficulty : room.settings.aiDifficulty,
     aiCanDraw: Boolean(settings.aiCanDraw),
     isPublic: Boolean(settings.isPublic),
@@ -728,7 +738,8 @@ function updateRoomSettings(room, settings) {
 
 function addAiPlayer(room) {
   if (room.phase !== 'lobby' && room.phase !== 'ended') return
-  if (room.players.size >= MAX_PLAYERS) return
+  const activePlayerCount = [...room.players.values()].filter((player) => !player.isSpectator).length
+  if (activePlayerCount >= room.settings.maxPlayers) return
   const usedNames = new Set([...room.players.values()].map((player) => player.name))
   const template = AI_PLAYERS.find((candidate) => !usedNames.has(candidate.name)) || {
     name: `AI ${room.players.size + 1}`,
@@ -800,7 +811,9 @@ function voteKickPlayer(room, voter, playerId) {
 function awardCorrectGuess(room, player) {
   if (room.guessedPlayerIds.has(player.id)) return
   room.guessedPlayerIds.add(player.id)
-  player.score += Math.max(10, room.timeLeft * 10)
+  const points = Math.max(10, room.timeLeft * 10)
+  player.score += points
+  room.turnPoints.set(player.id, (room.turnPoints.get(player.id) || 0) + points)
   broadcast(room, {
     type: 'correct_guess',
     playerId: player.id,
@@ -1287,6 +1300,21 @@ function handleSocketMessage(socket, message) {
 
   if (message.type === 'start_game' && player.id === room.hostId) {
     startGame(room)
+    return
+  }
+
+  if (message.type === 'return_lobby' && player.id === room.hostId && room.phase === 'ended') {
+    clearRoomTimers(room)
+    room.phase = 'lobby'
+    room.round = 1
+    room.turnIndex = -1
+    room.drawerId = null
+    room.secretWord = ''
+    room.wordLength = 0
+    room.strokes = []
+    room.guessedPlayerIds.clear()
+    room.turnPoints.clear()
+    broadcastRoomState(room)
     return
   }
 
