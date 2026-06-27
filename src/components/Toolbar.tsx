@@ -13,6 +13,7 @@ export interface ToolbarProps {
   onRedo: () => void
   canUndo: boolean
   canRedo: boolean
+  disabled?: boolean
 }
 
 function IconPencil() {
@@ -82,6 +83,7 @@ export function Toolbar({
   onRedo,
   canUndo,
   canRedo,
+  disabled = false,
 }: ToolbarProps) {
   return (
     <div className="toolbar-stack">
@@ -92,6 +94,7 @@ export function Toolbar({
           onClick={() => onModeChange('draw')}
           aria-pressed={mode === 'draw'}
           title="Draw"
+          disabled={disabled}
         >
           <IconPencil />
           {mode === 'draw' && <span className="toolbar__badge" title="Active" />}
@@ -102,6 +105,7 @@ export function Toolbar({
           onClick={() => onModeChange('erase')}
           aria-pressed={mode === 'erase'}
           title="Erase"
+          disabled={disabled}
         >
           <IconEraser />
           {mode === 'erase' && <span className="toolbar__badge toolbar__badge--muted" title="Active" />}
@@ -113,7 +117,7 @@ export function Toolbar({
           type="button"
           className="toolbar__btn"
           onClick={onUndo}
-          disabled={!canUndo}
+          disabled={disabled || !canUndo}
           title="Undo"
           aria-label="Undo"
         >
@@ -123,7 +127,7 @@ export function Toolbar({
           type="button"
           className="toolbar__btn"
           onClick={onRedo}
-          disabled={!canRedo}
+          disabled={disabled || !canRedo}
           title="Redo"
           aria-label="Redo"
         >
@@ -132,7 +136,7 @@ export function Toolbar({
 
         <span className="toolbar__divider" aria-hidden />
 
-        <button type="button" className="toolbar__btn" onClick={onClear} title="Clear canvas">
+        <button type="button" className="toolbar__btn" onClick={onClear} title="Clear canvas" disabled={disabled}>
           <IconTrash />
         </button>
       </div>
@@ -147,6 +151,7 @@ export function Toolbar({
             onChange={(e) => onColorChange(e.target.value)}
             title="Brush color"
             aria-label="Brush color"
+            disabled={disabled}
           />
         </label>
         <label className="toolbar__label toolbar__label--grow">
@@ -159,6 +164,7 @@ export function Toolbar({
             value={brushSize}
             onChange={(e) => onBrushSizeChange(Number(e.target.value))}
             aria-label="Brush size"
+            disabled={disabled}
           />
         </label>
       </div>
