@@ -15,7 +15,6 @@ const API_ORIGIN = import.meta.env.VITE_API_ORIGIN || (import.meta.env.PROD ? wi
 const PIXEL_PAL_API_URL = import.meta.env.VITE_PIXEL_PAL_API_URL || `${API_ORIGIN}/api/guess`
 const ROOM_API_URL = import.meta.env.VITE_ROOM_API_URL || `${API_ORIGIN}/api/rooms`
 const PUBLIC_ROOMS_API_URL = import.meta.env.VITE_PUBLIC_ROOMS_API_URL || `${API_ORIGIN}/api/public-rooms`
-const HISTORY_API_URL = import.meta.env.VITE_HISTORY_API_URL || `${API_ORIGIN}/api/history`
 const ROOM_WS_URL =
   import.meta.env.VITE_ROOM_WS_URL ||
   `${API_ORIGIN.replace(/^http/, 'ws')}/ws`
@@ -45,6 +44,12 @@ interface ChatMessage {
   correct?: boolean
 }
 
+interface GameNotification {
+  id: number
+  message: string
+  tone: 'info' | 'success' | 'error'
+}
+
 interface RoomPlayer {
   id: string
   name: string
@@ -69,6 +74,7 @@ interface AiSettings {
 interface RoomSettings {
   rounds: number
   drawTime: number
+  maxPlayers: number
   aiDifficulty: AiDifficulty
   aiCanDraw: boolean
   isPublic: boolean
@@ -89,11 +95,6 @@ interface PublicRoom {
   aiCanDraw: boolean
   language: string
   wordDifficulty: string
-}
-
-interface HistorySummary {
-  games: Array<{ roomCode: string; endedAt: string; players: RoomPlayer[] }>
-  reports: Array<{ roomCode: string; reporter: string; reported: string; createdAt: string }>
 }
 
 interface AiPlayer {
@@ -258,20 +259,33 @@ function HomeScreen({
   onPlayAi,
   activeRoomCode,
 }: {
-  onCreateRoom: (name: string, avatar: string) => void
+  onCreateRoom: (name: string, avatar: string, settings: RoomSettings, aiCount: number) => void
   onJoinRoom: (code: string, name: string, avatar: string, spectator?: boolean) => void
   onPlayAi: (name: string, avatar: string, settings: AiSettings) => void
   activeRoomCode: string | null
 }) {
   const [joinCode, setJoinCode] = useState('')
+  const [setupMode, setSetupMode] = useState<'create' | 'join' | 'ai' | null>(null)
   const [displayName, setDisplayName] = useState('')
   const [avatar, setAvatar] = useState(AVATAR_OPTIONS[0]!.id)
   const [aiCount, setAiCount] = useState(1)
   const [aiDifficulty, setAiDifficulty] = useState<AiDifficulty>('medium')
   const [aiCanDraw, setAiCanDraw] = useState(false)
+  const [createAiCount, setCreateAiCount] = useState(0)
+  const [createSettings, setCreateSettings] = useState<RoomSettings>({
+    rounds: 3,
+    drawTime: ROUND_SECONDS,
+    maxPlayers: 8,
+    aiDifficulty: 'medium',
+    aiCanDraw: false,
+    isPublic: false,
+    language: 'en',
+    wordDifficulty: 'medium',
+    customWordMode: 'disabled',
+    customWords: [],
+  })
   const [publicRooms, setPublicRooms] = useState<PublicRoom[]>([])
   const [publicRoomsStatus, setPublicRoomsStatus] = useState('')
-  const [history, setHistory] = useState<HistorySummary>({ games: [], reports: [] })
   const trimmedName = displayName.trim()
   const nameValid = isValidDisplayName(displayName)
 
@@ -307,23 +321,6 @@ function HomeScreen({
     const timerId = window.setInterval(refreshPublicRooms, 5000)
     return () => window.clearInterval(timerId)
   }, [refreshPublicRooms])
-
-  const refreshHistory = useCallback(async () => {
-    try {
-      const response = await fetch(HISTORY_API_URL)
-      const payload = await response.json()
-      setHistory({
-        games: Array.isArray(payload.games) ? payload.games : [],
-        reports: Array.isArray(payload.reports) ? payload.reports : [],
-      })
-    } catch {
-      setHistory({ games: [], reports: [] })
-    }
-  }, [])
-
-  useEffect(() => {
-    void refreshHistory()
-  }, [refreshHistory])
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -390,7 +387,7 @@ function HomeScreen({
               <button
                 className="flag-btn"
                 type="button"
-                onClick={() => onCreateRoom(trimmedName, avatar)}
+                onClick={() => setSetupMode('create')}
                 disabled={!nameValid}
               >
                 CREATE ROOM
@@ -398,118 +395,118 @@ function HomeScreen({
               <button
                 className="flag-btn flag-btn--secondary"
                 type="button"
-                onClick={() =>
-                  onPlayAi(trimmedName, avatar, {
-                    count: aiCount,
-                    difficulty: aiDifficulty,
-                    canDraw: aiCanDraw,
-                  })
-                }
+                onClick={() => setSetupMode('join')}
+                disabled={!nameValid}
+              >
+                JOIN ROOM
+              </button>
+              <button
+                className="flag-btn"
+                type="button"
+                onClick={() => setSetupMode('ai')}
                 disabled={!nameValid}
               >
                 PLAY WITH AI
               </button>
             </div>
-            <div className="ai-settings" aria-label="AI settings">
-              <label>
-                AI PLAYERS
-                <select value={aiCount} onChange={(event) => setAiCount(Number(event.target.value))}>
-                  <option value={1}>1</option>
-                  <option value={2}>2</option>
-                  <option value={3}>3</option>
-                  <option value={4}>4</option>
-                </select>
-              </label>
-              <label>
-                DIFFICULTY
-                <select
-                  value={aiDifficulty}
-                  onChange={(event) => setAiDifficulty(event.target.value as AiDifficulty)}
-                >
-                  <option value="easy">Easy</option>
-                  <option value="medium">Medium</option>
-                  <option value="hard">Hard</option>
-                </select>
-              </label>
-              <label className="ai-settings__toggle">
-                <input
-                  type="checkbox"
-                  checked={aiCanDraw}
-                  onChange={(event) => setAiCanDraw(event.target.checked)}
-                />
-                AI DRAW
-              </label>
-            </div>
+            {setupMode === 'create' && (
+              <section className="home-setup" aria-label="Create room settings">
+                <div className="public-rooms__head"><span>CREATE ROOM SETTINGS</span></div>
+                <div className="ai-settings">
+                  <label>ROUNDS
+                    <select value={createSettings.rounds} onChange={(event) => setCreateSettings((current) => ({ ...current, rounds: Number(event.target.value) }))}>
+                      {[1, 2, 3, 4, 5, 6].map((value) => <option key={value} value={value}>{value}</option>)}
+                    </select>
+                  </label>
+                  <label>DRAW TIME
+                    <select value={createSettings.drawTime} onChange={(event) => setCreateSettings((current) => ({ ...current, drawTime: Number(event.target.value) }))}>
+                      {[30, 45, 60, 90, 120].map((value) => <option key={value} value={value}>{value}s</option>)}
+                    </select>
+                  </label>
+                  <label>MAX PLAYERS
+                    <select value={createSettings.maxPlayers} onChange={(event) => setCreateSettings((current) => ({ ...current, maxPlayers: Number(event.target.value) }))}>
+                      {[2, 4, 6, 8].map((value) => <option key={value} value={value}>{value}</option>)}
+                    </select>
+                  </label>
+                  <label>AI PLAYERS
+                    <select value={createAiCount} onChange={(event) => setCreateAiCount(Number(event.target.value))}>
+                      {[0, 1, 2, 3, 4].map((value) => <option key={value} value={value}>{value}</option>)}
+                    </select>
+                  </label>
+                  <label>AI LEVEL
+                    <select value={createSettings.aiDifficulty} onChange={(event) => setCreateSettings((current) => ({ ...current, aiDifficulty: event.target.value as AiDifficulty }))}>
+                      <option value="easy">Easy</option>
+                      <option value="medium">Medium</option>
+                      <option value="hard">Hard</option>
+                    </select>
+                  </label>
+                  <label className="ai-settings__toggle">
+                    <input type="checkbox" checked={createSettings.isPublic} onChange={(event) => setCreateSettings((current) => ({ ...current, isPublic: event.target.checked }))} />
+                    {createSettings.isPublic ? 'PUBLIC' : 'PRIVATE'}
+                  </label>
+                </div>
+                <p className="setup-summary">
+                  {createSettings.rounds} rounds · {createSettings.drawTime}s · {createSettings.maxPlayers} players · {createAiCount} AI · {createSettings.isPublic ? 'public' : 'private'}
+                </p>
+                <button className="px-btn px-btn--primary" type="button" disabled={!nameValid} onClick={() => onCreateRoom(trimmedName, avatar, createSettings, createAiCount)}>
+                  CREATE ROOM
+                </button>
+              </section>
+            )}
+            {setupMode === 'ai' && (
+              <section className="home-setup" aria-label="AI game settings">
+                <div className="public-rooms__head"><span>PLAY WITH AI</span></div>
+                <div className="ai-settings">
+                  <label>AI PLAYERS
+                    <select value={aiCount} onChange={(event) => setAiCount(Number(event.target.value))}>
+                      {[1, 2, 3, 4].map((value) => <option key={value} value={value}>{value}</option>)}
+                    </select>
+                  </label>
+                  <label>DIFFICULTY
+                    <select value={aiDifficulty} onChange={(event) => setAiDifficulty(event.target.value as AiDifficulty)}>
+                      <option value="easy">Easy</option>
+                      <option value="medium">Medium</option>
+                      <option value="hard">Hard</option>
+                    </select>
+                  </label>
+                  <label className="ai-settings__toggle">
+                    <input type="checkbox" checked={aiCanDraw} onChange={(event) => setAiCanDraw(event.target.checked)} />
+                    AI DRAW
+                  </label>
+                </div>
+                <button className="px-btn px-btn--primary" type="button" disabled={!nameValid} onClick={() => onPlayAi(trimmedName, avatar, { count: aiCount, difficulty: aiDifficulty, canDraw: aiCanDraw })}>
+                  CONTINUE
+                </button>
+              </section>
+            )}
+            {setupMode === 'join' && (
+              <section className="home-setup" aria-label="Join room">
+                <form className="join-room-form" onSubmit={handleJoinSubmit}>
+                  <label htmlFor="join-room-code">ROOM CODE</label>
+                  <div className="join-room-form__row">
+                    <input id="join-room-code" value={joinCode} onChange={(event) => setJoinCode(normalizeRoomCode(event.target.value))} placeholder="5-CHARACTER CODE" maxLength={5} aria-label="Room code" aria-invalid={joinCode.length > 0 && joinCode.length !== 5} />
+                    <button type="submit" disabled={joinCode.length !== 5 || !nameValid}>JOIN</button>
+                    <button type="button" disabled={joinCode.length !== 5 || !nameValid} onClick={() => onJoinRoom(joinCode, trimmedName, avatar, true)}>WATCH</button>
+                  </div>
+                  {joinCode.length > 0 && joinCode.length !== 5 && <span className="profile-setup__error">Room codes contain 5 characters.</span>}
+                </form>
+                <div className="public-rooms" aria-label="Public rooms">
+                  <div className="public-rooms__head"><span>PUBLIC ROOMS</span><button type="button" onClick={refreshPublicRooms}>REFRESH</button></div>
+                  {publicRoomsStatus && <p>{publicRoomsStatus}</p>}
+                  {publicRooms.length === 0 && !publicRoomsStatus && <p>No public rooms yet.</p>}
+                  {publicRooms.map((room) => (
+                    <button type="button" className="public-room" key={room.code} onClick={() => onJoinRoom(room.code, trimmedName, avatar)} disabled={!nameValid || room.playerCount >= room.maxPlayers}>
+                      <strong>{room.code}</strong><span>{room.playerCount}/{room.maxPlayers} players</span><span>{room.wordDifficulty} · {room.language}</span>
+                    </button>
+                  ))}
+                </div>
+              </section>
+            )}
             {activeRoomCode && (
               <div className="room-code-card" aria-live="polite">
-                <span>ROOM CODE</span>
-                <strong>{activeRoomCode}</strong>
-                <button type="button" onClick={handleCopyRoomCode}>
-                  COPY
-                </button>
+                <span>ROOM CODE</span><strong>{activeRoomCode}</strong><button type="button" onClick={handleCopyRoomCode}>COPY</button>
               </div>
             )}
-            <form className="join-room-form" onSubmit={handleJoinSubmit}>
-              <label htmlFor="join-room-code">JOIN ROOM</label>
-              <div className="join-room-form__row">
-                <input
-                  id="join-room-code"
-                  value={joinCode}
-                  onChange={(event) => setJoinCode(normalizeRoomCode(event.target.value))}
-                  placeholder="CODE"
-                  maxLength={5}
-                  aria-label="Room code"
-                />
-                <button type="submit" disabled={joinCode.length !== 5 || !nameValid}>
-                  JOIN
-                </button>
-                <button
-                  type="button"
-                  disabled={joinCode.length !== 5 || !nameValid}
-                  onClick={() => onJoinRoom(joinCode, trimmedName, avatar, true)}
-                >
-                  WATCH
-                </button>
-              </div>
-            </form>
-            <div className="public-rooms" aria-label="Public rooms">
-              <div className="public-rooms__head">
-                <span>PUBLIC ROOMS</span>
-                <button type="button" onClick={refreshPublicRooms}>
-                  REFRESH
-                </button>
-              </div>
-              {publicRoomsStatus && <p>{publicRoomsStatus}</p>}
-              {publicRooms.length === 0 && !publicRoomsStatus && <p>No public rooms yet.</p>}
-              {publicRooms.map((room) => (
-                <button
-                  type="button"
-                  className="public-room"
-                  key={room.code}
-                  onClick={() => onJoinRoom(room.code, trimmedName, avatar)}
-                  disabled={!nameValid || room.playerCount >= room.maxPlayers}
-                >
-                  <strong>{room.code}</strong>
-                  <span>{room.playerCount}/{room.maxPlayers} players</span>
-                  <span>{room.wordDifficulty} · {room.language}</span>
-                </button>
-              ))}
-            </div>
-            <div className="history-panel" aria-label="Recent activity">
-              <div className="public-rooms__head">
-                <span>RECENT</span>
-                <button type="button" onClick={refreshHistory}>
-                  UPDATE
-                </button>
-              </div>
-              {history.games.length === 0 && <p>No finished games yet.</p>}
-              {history.games.slice(0, 3).map((game) => (
-                <p key={`${game.roomCode}-${game.endedAt}`}>
-                  {game.roomCode}: {game.players[0]?.name || 'No winner'} won
-                </p>
-              ))}
-              {history.reports.length > 0 && <p>{history.reports.length} recent report(s)</p>}
-            </div>
           </div>
         </div>
       </section>
@@ -544,6 +541,9 @@ function App() {
   const reconnectRoomRef = useRef<(code: string, name: string, avatar: string, spectator: boolean) => void>(
     () => undefined,
   )
+  const pendingRoomSetupRef = useRef<{ settings: RoomSettings; aiCount: number; autoStart?: boolean } | null>(null)
+  const roomPlayerIdRef = useRef<string | null>(null)
+  const chatListRef = useRef<HTMLDivElement | null>(null)
   const sentStrokeIdsRef = useRef<Set<string>>(new Set())
 
   const [color, setColor] = useState(DEFAULT_BRUSH_COLOR)
@@ -568,6 +568,7 @@ function App() {
   const [roomSettings, setRoomSettings] = useState<RoomSettings>({
     rounds: 3,
     drawTime: ROUND_SECONDS,
+    maxPlayers: 8,
     aiDifficulty: 'medium',
     aiCanDraw: false,
     isPublic: false,
@@ -589,6 +590,11 @@ function App() {
   const [timeLeft, setTimeLeft] = useState(ROUND_SECONDS)
   const [roundEnded, setRoundEnded] = useState(false)
   const [chatDraft, setChatDraft] = useState('')
+  const [roundSummary, setRoundSummary] = useState<{ pointsEarned: Record<string, number>; nextDrawerName: string }>({
+    pointsEarned: {},
+    nextDrawerName: '',
+  })
+  const [notifications, setNotifications] = useState<GameNotification[]>([])
   const [theme, setTheme] = useState(() => localStorage.getItem('moodle-theme') || 'classic')
   const [soundEnabled, setSoundEnabled] = useState(() => localStorage.getItem('moodle-sound') !== 'off')
   const [localWins, setLocalWins] = useState(() => Number(localStorage.getItem('moodle-wins') || 0))
@@ -599,6 +605,14 @@ function App() {
 
   const handleCanvasReady = useCallback((canvas: HTMLCanvasElement | null) => {
     canvasElRef.current = canvas
+  }, [])
+
+  const notify = useCallback((message: string, tone: GameNotification['tone'] = 'info') => {
+    const id = Date.now() + Math.floor(Math.random() * 1000)
+    setNotifications((current) => [...current.slice(-2), { id, message, tone }])
+    window.setTimeout(() => {
+      setNotifications((current) => current.filter((notification) => notification.id !== id))
+    }, 3200)
   }, [])
 
   const playTone = useCallback(() => {
@@ -625,6 +639,11 @@ function App() {
   useEffect(() => {
     localStorage.setItem('moodle-sound', soundEnabled ? 'on' : 'off')
   }, [soundEnabled])
+
+  useEffect(() => {
+    const chatList = chatListRef.current
+    if (chatList) chatList.scrollTop = chatList.scrollHeight
+  }, [chatMessages])
 
   const handleClear = useCallback(() => {
     if (!window.confirm('Are you sure you want to clear the entire canvas?')) {
@@ -675,11 +694,13 @@ function App() {
         if (message.type === 'room_state') {
           setRoomCode(message.roomCode)
           setRoomPlayerId(message.playerId || null)
+          roomPlayerIdRef.current = message.playerId || null
           setIsSpectator(Boolean(message.isSpectator))
           setRoomPhase(message.phase || 'lobby')
           setRoomSettings(message.settings || {
             rounds: 3,
             drawTime: ROUND_SECONDS,
+            maxPlayers: 8,
             aiDifficulty: 'medium',
             aiCanDraw: false,
             isPublic: false,
@@ -702,8 +723,18 @@ function App() {
           setCurrentRound(message.round || 1)
           setTotalRounds(message.totalRounds || 3)
           setRoundEnded(message.phase === 'reveal' || message.phase === 'ended')
+          setHasCorrectGuess(Boolean((message.players || []).find((player: RoomPlayer) => player.id === message.playerId)?.guessed))
           setStrokes(message.strokes || [])
           sentStrokeIdsRef.current = new Set((message.strokes || []).map((stroke: Stroke) => stroke.id))
+          const pendingSetup = pendingRoomSetupRef.current
+          if (pendingSetup && message.playerId === message.hostId) {
+            socket.send(JSON.stringify({ type: 'update_settings', settings: pendingSetup.settings }))
+            for (let index = 0; index < pendingSetup.aiCount; index += 1) {
+              socket.send(JSON.stringify({ type: 'add_ai' }))
+            }
+            if (pendingSetup.autoStart) socket.send(JSON.stringify({ type: 'start_game' }))
+            pendingRoomSetupRef.current = null
+          }
           return
         }
 
@@ -723,6 +754,7 @@ function App() {
         if (message.type === 'word_chosen') {
           setRoomPhase('drawing')
           setRoundEnded(false)
+          setHasCorrectGuess(false)
           setIsChoosingWord(false)
           setWordChoices([])
           setChoiceTimeLeft(0)
@@ -734,6 +766,7 @@ function App() {
               role: 'system',
             },
           ])
+          notify('New drawing turn started.')
           return
         }
 
@@ -761,6 +794,7 @@ function App() {
         if (message.type === 'correct_guess') {
           playTone()
           setRoomPlayers(message.players || [])
+          if (message.playerId === roomPlayerIdRef.current) setHasCorrectGuess(true)
           setChatMessages((current) => [
             ...current,
             {
@@ -770,6 +804,10 @@ function App() {
               correct: true,
             },
           ])
+          notify(
+            message.playerId === roomPlayerIdRef.current ? 'Correct guess! Points awarded.' : `${message.playerName} guessed correctly.`,
+            'success',
+          )
           return
         }
 
@@ -778,6 +816,10 @@ function App() {
           setCurrentWord(message.word)
           setRoomPlayers(message.players || [])
           setRoundEnded(true)
+          setRoundSummary({
+            pointsEarned: message.pointsEarned || {},
+            nextDrawerName: message.nextDrawerName || '',
+          })
           setChatMessages((current) => [
             ...current,
             {
@@ -786,6 +828,7 @@ function App() {
               role: 'system',
             },
           ])
+          notify(`Round ended. The word was ${message.word}.`)
           return
         }
 
@@ -811,6 +854,7 @@ function App() {
               correct: true,
             },
           ])
+          notify(winner ? `${winner} wins the game!` : 'Game completed.', 'success')
           return
         }
 
@@ -827,10 +871,16 @@ function App() {
               role: 'system',
             },
           ])
+          notify(
+            message.type === 'player_joined'
+              ? `${message.player.name} joined.`
+              : `${message.playerName || 'A player'} left.`,
+          )
           return
         }
 
         if (message.type === 'error') {
+          notify(message.message || 'Room error. Try again.', 'error')
           setChatMessages((current) => [
             ...current,
             { name: 'Moodle', text: message.message || 'Room error.', role: 'system' },
@@ -840,6 +890,7 @@ function App() {
 
         if (message.type === 'join_error') {
           setRoomStatus('Error')
+          notify(`${message.message || 'Could not join room.'} Check the code and try again.`, 'error')
           setChatMessages((current) => [
             ...current,
             { name: 'Moodle', text: message.message || 'Could not join room.', role: 'system' },
@@ -850,6 +901,7 @@ function App() {
       socket.addEventListener('close', () => {
         if (roomSocketRef.current !== socket) return
         setRoomStatus('Reconnecting')
+        notify('Connection lost. Reconnecting automatically.', 'error')
         reconnectAttemptsRef.current += 1
         const delay = Math.min(10_000, 750 * 2 ** (reconnectAttemptsRef.current - 1))
         reconnectTimerRef.current = window.setTimeout(() => {
@@ -857,39 +909,44 @@ function App() {
         }, delay)
       })
     },
-    [addRemoteStroke, closeRoomSocket, playTone, playerName, setStrokes],
+    [addRemoteStroke, closeRoomSocket, notify, playTone, playerName, setStrokes],
   )
   reconnectRoomRef.current = connectRoomSocket
 
   useEffect(() => closeRoomSocket, [closeRoomSocket])
 
-  const openAiGame = useCallback((name: string, avatar: string, settings: AiSettings) => {
-    closeRoomSocket()
-    setPlayerName(name)
-    setPlayerAvatar(avatar)
-    setAiSettings(settings)
-    setAiPlayers(createAiPlayers(settings.count))
-    setHasCorrectGuess(false)
-    setRoundEnded(false)
-    setTimeLeft(ROUND_SECONDS)
-    lastAiGuessStageRef.current = 0
-    aiGuessPendingRef.current = false
-    setGameMode('ai')
-    setRoomCode(null)
-    setScreen('game')
-    setChatMessages((current) => [
-      ...current,
-      {
-        name: 'Moodle',
-        text: `AI game started with ${settings.count} AI player${settings.count === 1 ? '' : 's'} on ${settings.difficulty}.`,
-        role: 'system',
-      },
-    ])
-  }, [closeRoomSocket])
-
-  const openRoomGame = useCallback(async (name: string, avatar: string) => {
+  const openAiGame = useCallback(async (name: string, avatar: string, settings: AiSettings) => {
     try {
       const code = await createServerRoom()
+      const roomSetup: RoomSettings = {
+        rounds: 3,
+        drawTime: ROUND_SECONDS,
+        maxPlayers: Math.min(8, settings.count + 1),
+        aiDifficulty: settings.difficulty,
+        aiCanDraw: true,
+        isPublic: false,
+        language: 'en',
+        wordDifficulty: 'medium',
+        customWordMode: 'disabled',
+        customWords: [],
+      }
+      pendingRoomSetupRef.current = { settings: roomSetup, aiCount: settings.count, autoStart: true }
+      setPlayerName(name)
+      setPlayerAvatar(avatar)
+      setAiSettings(settings)
+      setGameMode('room')
+      setRoomCode(code)
+      setScreen('game')
+      connectRoomSocket(code, name, avatar)
+    } catch {
+      notify('Server unavailable. Start the API and try again.', 'error')
+    }
+  }, [connectRoomSocket, notify])
+
+  const openRoomGame = useCallback(async (name: string, avatar: string, settings: RoomSettings, aiCount: number) => {
+    try {
+      const code = await createServerRoom()
+      pendingRoomSetupRef.current = { settings, aiCount }
       setPlayerName(name)
       setPlayerAvatar(avatar)
       setGameMode('room')
@@ -905,6 +962,7 @@ function App() {
       ])
       connectRoomSocket(code, name, avatar)
     } catch (error) {
+      notify('Server unavailable. Start the API and try again.', 'error')
       setChatMessages((current) => [
         ...current,
         {
@@ -914,7 +972,7 @@ function App() {
         },
       ])
     }
-  }, [connectRoomSocket])
+  }, [connectRoomSocket, notify])
 
   const joinRoomGame = useCallback((code: string, name: string, avatar: string, spectator = false) => {
     setPlayerName(name)
@@ -1017,6 +1075,18 @@ function App() {
     sendRoomMessage({ type: 'start_game' })
   }, [sendRoomMessage])
 
+  const returnRoomToLobby = useCallback(() => {
+    sendRoomMessage({ type: 'return_lobby' })
+  }, [sendRoomMessage])
+
+  const returnToMainMenu = useCallback(() => {
+    closeRoomSocket()
+    setRoomCode(null)
+    setScreen('home')
+    setStrokes([])
+    window.history.replaceState({}, '', window.location.pathname)
+  }, [closeRoomSocket, setStrokes])
+
   const addRoomAiPlayer = useCallback(() => {
     sendRoomMessage({ type: 'add_ai' })
   }, [sendRoomMessage])
@@ -1064,6 +1134,12 @@ function App() {
     },
     [roomCode],
   )
+
+  const copyRoomCode = useCallback(() => {
+    if (!roomCode) return
+    void navigator.clipboard?.writeText(roomCode)
+    notify('Room code copied.', 'success')
+  }, [notify, roomCode])
 
   const saveDrawing = useCallback(() => {
     const canvas = canvasElRef.current
@@ -1232,11 +1308,24 @@ function App() {
   }, [activeStroke, aiPlayers, aiSettings.difficulty, currentWord, gameMode, hasCorrectGuess, roundEnded, screen, strokes, timeLeft])
 
   const isRoomHost = gameMode === 'room' && roomPlayers.some((player) => player.id === roomPlayerId && player.isHost)
-  const canStartRoom = roomPlayers.length >= 2 && (roomPhase === 'lobby' || roomPhase === 'ended')
+  const connectedRoomPlayers = roomPlayers.filter((player) => !player.isSpectator && !player.disconnected)
+  const canStartRoom = connectedRoomPlayers.length >= 2 && (roomPhase === 'lobby' || roomPhase === 'ended')
+  const roomHostName = roomPlayers.find((player) => player.isHost)?.name || 'Assigning host'
+  const rankedRoomPlayers = [...roomPlayers]
+    .filter((player) => !player.isSpectator)
+    .sort((a, b) => b.score - a.score)
+  const drawingControlsEnabled = gameMode !== 'room' || (isDrawer && roomPhase === 'drawing')
 
   return (
     <>
       <PixelBackdrop />
+      <div className="notification-stack" aria-live="polite" aria-atomic="false">
+        {notifications.map((notification) => (
+          <div className={`game-notification game-notification--${notification.tone}`} key={notification.id}>
+            {notification.message}
+          </div>
+        ))}
+      </div>
       {screen === 'home' && (
         <HomeScreen
           onCreateRoom={openRoomGame}
@@ -1314,14 +1403,20 @@ function App() {
             </div>
           </section>
         )}
-        {gameMode === 'room' && (roomPhase === 'lobby' || roomPhase === 'ended') && (
+        {gameMode === 'room' && roomPhase === 'lobby' && (
           <section className="lobby-panel" aria-label="Room lobby">
             <div>
-              <div className="px-panel-title">ROOM {roomCode}</div>
+              <div className="lobby-code">
+                <div className="px-panel-title">ROOM {roomCode}</div>
+                <button type="button" className="px-btn" onClick={copyRoomCode}>COPY CODE</button>
+              </div>
               <p>
                 {isRoomHost
                   ? 'Configure the room, add AI players, then start.'
                   : 'Waiting for the host to start the game.'}
+              </p>
+              <p className="lobby-meta">
+                Host: {roomHostName} · {connectedRoomPlayers.length}/{roomSettings.maxPlayers} connected · {roomSettings.rounds} rounds · {roomSettings.drawTime}s
               </p>
             </div>
             <div className="lobby-settings">
@@ -1354,6 +1449,20 @@ function App() {
                     <option key={seconds} value={seconds}>
                       {seconds}s
                     </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                MAX PLAYERS
+                <select
+                  value={roomSettings.maxPlayers}
+                  onChange={(event) =>
+                    updateRoomSettings({ ...roomSettings, maxPlayers: Number(event.target.value) })
+                  }
+                  disabled={!isRoomHost}
+                >
+                  {[2, 4, 6, 8].map((count) => (
+                    <option key={count} value={count}>{count}</option>
                   ))}
                 </select>
               </label>
@@ -1466,7 +1575,7 @@ function App() {
                 <button type="button" className="px-btn" onClick={() => copyShareLink(true)}>
                   WATCH LINK
                 </button>
-                <button type="button" className="px-btn" onClick={addRoomAiPlayer} disabled={roomPlayers.length >= 8}>
+                <button type="button" className="px-btn" onClick={addRoomAiPlayer} disabled={connectedRoomPlayers.length >= roomSettings.maxPlayers}>
                   ADD AI
                 </button>
                 <button type="button" className="px-btn px-btn--primary" onClick={startRoomGame} disabled={!canStartRoom}>
@@ -1477,23 +1586,37 @@ function App() {
           </section>
         )}
         {gameMode === 'room' && (roomPhase === 'reveal' || roomPhase === 'ended') && (
-          <section className="transition-panel" aria-label="Round summary">
+          <section className={`transition-panel${roomPhase === 'ended' ? ' transition-panel--final' : ''}`} aria-label="Round summary">
             <div>
               <div className="px-panel-title">{roomPhase === 'ended' ? 'FINAL RANKING' : 'ROUND OVER'}</div>
-              <p>{roomPhase === 'ended' ? 'Game complete.' : `The word was ${currentWord}.`}</p>
+              <p>
+                {roomPhase === 'ended'
+                  ? `${rankedRoomPlayers[0]?.name || 'No player'} wins!`
+                  : `The word was ${currentWord}. Next: ${roundSummary.nextDrawerName || 'starting soon'}.`}
+              </p>
             </div>
             <ol>
-              {[...roomPlayers]
-                .filter((player) => !player.isSpectator)
-                .sort((a, b) => b.score - a.score)
+              {rankedRoomPlayers
                 .slice(0, 5)
-                .map((player) => (
-                  <li key={player.id}>
+                .map((player, index) => (
+                  <li className={index === 0 && roomPhase === 'ended' ? 'winner' : ''} key={player.id}>
                     <span>{player.name}{player.isAi ? ' AI' : ''}</span>
-                    <strong>{player.score}</strong>
+                    <strong>
+                      {player.score} pts
+                      {roomPhase === 'reveal' && roundSummary.pointsEarned[player.id]
+                        ? ` (+${roundSummary.pointsEarned[player.id]})`
+                        : ''}
+                    </strong>
                   </li>
                 ))}
             </ol>
+            {roomPhase === 'ended' && (
+              <div className="end-game-actions">
+                {isRoomHost && <button type="button" className="px-btn px-btn--primary" onClick={startRoomGame}>PLAY AGAIN</button>}
+                {isRoomHost && <button type="button" className="px-btn" onClick={returnRoomToLobby}>RETURN TO LOBBY</button>}
+                <button type="button" className="px-btn" onClick={returnToMainMenu}>MAIN MENU</button>
+              </div>
+            )}
           </section>
         )}
 
@@ -1502,11 +1625,12 @@ function App() {
             <div className="px-panel-title">PLAYERS</div>
             <div className="side-list">
               {gameMode === 'room'
-                ? roomPlayers.map((player) => (
+                ? (roomPhase === 'lobby' ? roomPlayers : rankedRoomPlayers).map((player, index) => (
                     <div
                       className={`gp-card${player.isDrawer ? ' drawing' : ''}${player.guessed ? ' guessed' : ''}`}
                       key={player.id}
                     >
+                      <span className="gp-rank" aria-label={`Rank ${index + 1}`}>#{index + 1}</span>
                       <span className="gp-av">{player.isDrawer ? '✎' : player.guessed ? '✓' : avatarIcon(player.avatar)}</span>
                       <span className="gp-info">
                         <span className="gp-nm">
@@ -1590,6 +1714,7 @@ function App() {
               onRedo={engine.redo}
               canUndo={canUndo}
               canRedo={canRedo}
+              disabled={!drawingControlsEnabled}
             />
             <div className="utility-bar" aria-label="Game utilities">
               <button type="button" onClick={saveDrawing}>
@@ -1663,7 +1788,7 @@ function App() {
               autoPlay
               aria-hidden
             />
-            <div className="chat-list" aria-live="polite">
+            <div className="chat-list" aria-live="polite" ref={chatListRef}>
               {chatMessages.map((message, index) => (
                 <div
                   className={`chat-bubble${message.name === 'You' ? ' chat-bubble--me' : ''}${
@@ -1683,11 +1808,17 @@ function App() {
                 className="chat-input"
                 value={chatDraft}
                 onChange={(event) => setChatDraft(event.target.value)}
-                placeholder={gameMode === 'room' && isDrawer ? 'Drawer cannot guess' : 'Type guess'}
+                placeholder={
+                  gameMode === 'room' && isDrawer
+                    ? 'Drawer cannot guess'
+                    : hasCorrectGuess
+                      ? 'Correct! Waiting for others'
+                      : 'Type guess'
+                }
                 aria-label="Chat message"
-                disabled={gameMode === 'room' && (isDrawer || roomPhase !== 'drawing')}
+                disabled={gameMode === 'room' && (isDrawer || hasCorrectGuess || roomPhase !== 'drawing')}
               />
-              <button className="chat-send" type="submit" disabled={gameMode === 'room' && (isDrawer || roomPhase !== 'drawing')}>
+              <button className="chat-send" type="submit" disabled={gameMode === 'room' && (isDrawer || hasCorrectGuess || roomPhase !== 'drawing')}>
                 SEND
               </button>
             </form>
