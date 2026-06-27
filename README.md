@@ -1,12 +1,13 @@
 # Moodle
 
-**Moodle** is a pixel-art drawing game website built with React and Vite. Players enter a drawing room, sketch the mystery word, and use the chat box to guess as drawings appear. The app supports mouse, touch, and hand gesture drawing for a more interactive canvas experience.
+**Moodle** is a real-time pixel-art drawing and guessing game. Players create private or public rooms, draw mystery words, chat, score points, or compete against server-controlled AI players. It supports mouse, touch, hand gestures, spectators, reconnects, and mobile screens without requiring an account.
 
 ## Demo
 
-Run the project locally, then open the local Vite URL.
+Run the API and frontend in separate terminals.
 
 ```bash
+npm run dev:api
 npm run dev
 ```
 
@@ -18,61 +19,65 @@ http://127.0.0.1:5173/
 
 ```mermaid
 flowchart TD
-  A["App.tsx"] --> B["Homepage"]
-  A --> C["Drawing Room"]
-  C --> D["Word Bar"]
-  C --> E["Drawing Canvas"]
-  C --> F["Toolbar"]
-  C --> G["Chat Box"]
-  C --> H["Help Dialog"]
-  E --> I["Drawing State"]
-  E --> J["Pointer Input"]
-  E --> K["Hand Gesture Input"]
+  A["React Client"] <-->|"WebSocket events"| B["Node Game Server"]
+  A --> C["Canvas and Chat"]
+  A --> D["Lobby and Scoreboard"]
+  B --> E["Rooms and Timers"]
+  B --> F["Words and Scoring"]
+  B --> G["AI Players"]
+  B --> H["Room Snapshots"]
+  G --> I["OpenAI Vision"]
+  H --> J["Persistent Disk"]
 ```
 
 ```text
 src/
-  components/     Drawing canvas, cursor, toolbar, and UI panels
-  hooks/          Drawing state, pointer input, and hand tracking logic
-  utils/          Gesture detection, coordinate mapping, and stroke rendering
-  types/          Shared drawing types
-  App.tsx         Main page flow and layout
-  App.css         Pixel-art UI styling
+  components/     Canvas, cursor, toolbar, and interface panels
+  hooks/          Drawing, pointer, gesture, and hand-tracking logic
+  utils/          Detection, coordinate mapping, and stroke rendering
+  App.tsx         Homepage, lobby, game, chat, and real-time room client
+  App.css         Responsive pixel-art interface
+server/
+  index.js        HTTP, WebSocket, rooms, AI, timers, and persistence
+  index.test.js   Protocol, validation, and sanitization tests
 ```
 
 ## Frontend
 
 | Area | Purpose |
 | --- | --- |
-| Homepage | Introduces Moodle and opens the drawing room |
-| Drawing room | Main game screen with the canvas, word bar, player panel, and chat |
+| Homepage | Creates, joins, watches, or browses rooms |
+| Lobby | Configures rounds, timer, words, AI, and room visibility |
+| Drawing room | Shows the canvas, hints, timer, players, scores, and chat |
 | Canvas | Supports mouse, touch, and hand-based drawing |
-| Help dialog | Shows the game instructions from the word bar |
 
 ## Special Features
 
-- Pixel-art themed interface
-- Large responsive drawing canvas
-- Bold readable word bar
-- Mouse and touch drawing
-- Hand gesture drawing with MediaPipe
-- Chat box for guesses
-- Help dialog with instructions
+- Real-time private and public rooms
+- Server-controlled words, timer, guesses, and scores
+- AI guessing and gradual AI drawing
+- Spectator links and reconnect recovery
+- Progressive word hints and drawing replay
+- Chat filtering, rate limits, reports, and vote-kick
 
 ## How It Works
 
-1. The homepage opens the drawing room when the player starts.
-2. The word bar shows the current mystery word as letter boxes.
-3. Pointer input and hand gestures both send drawing points to the canvas.
-4. The drawing engine stores each stroke with its color, size, and tool mode.
-5. The canvas redraws saved strokes whenever the drawing state changes.
+1. A player creates or joins a room through the homepage.
+2. The server chooses the drawer, offers three words, and controls the timer.
+3. The drawer sends validated stroke events through a WebSocket connection.
+4. Other players see the strokes immediately and submit guesses through chat.
+5. The server awards points, advances rounds, and stores room and game history.
 
 ## Tech Stack
 
 | Layer | Tools |
 | --- | --- |
-| Frontend | React, TypeScript |
-| Build tool | Vite |
+| Frontend | React, TypeScript, Vite |
 | Drawing | HTML Canvas |
 | Hand tracking | MediaPipe Tasks Vision |
+| Server | Node.js HTTP and WebSockets |
+| AI | OpenAI Responses API |
+| Persistence | Atomic JSON snapshots |
+| Testing | Node test runner, ESLint |
+| Deployment | Docker, Render blueprint |
 | Styling | CSS |
