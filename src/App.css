@@ -984,6 +984,80 @@ body {
   font-weight: 800;
 }
 
+.lobby-code {
+  margin-top: 10px;
+}
+
+.lobby-code > strong {
+  padding: 7px 10px;
+  border: 3px solid var(--outline);
+  background: var(--gold);
+  box-shadow: 2px 2px 0 var(--outline);
+  font-size: 15px;
+  letter-spacing: 1px;
+}
+
+.lobby-players {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.lobby-players__title {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--outline);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.lobby-players__list {
+  max-height: 154px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  overflow-y: auto;
+}
+
+.lobby-player {
+  min-width: 0;
+  padding: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 3px solid var(--outline);
+  background: var(--white);
+  box-shadow: 2px 2px 0 var(--outline);
+}
+
+.lobby-player__avatar {
+  font-size: 19px;
+}
+
+.lobby-player > span:last-child {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.lobby-player strong,
+.lobby-player small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lobby-player strong {
+  font-size: 11px;
+}
+
+.lobby-player small {
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 900;
+}
+
 .lobby-settings {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
