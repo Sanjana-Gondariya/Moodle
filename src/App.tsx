@@ -541,7 +541,7 @@ function App() {
   const reconnectRoomRef = useRef<(code: string, name: string, avatar: string, spectator: boolean) => void>(
     () => undefined,
   )
-  const pendingRoomSetupRef = useRef<{ settings: RoomSettings; aiCount: number; autoStart?: boolean } | null>(null)
+  const pendingRoomSetupRef = useRef<{ settings: RoomSettings; aiCount: number } | null>(null)
   const roomPlayerIdRef = useRef<string | null>(null)
   const chatListRef = useRef<HTMLDivElement | null>(null)
   const sentStrokeIdsRef = useRef<Set<string>>(new Set())
@@ -732,7 +732,6 @@ function App() {
             for (let index = 0; index < pendingSetup.aiCount; index += 1) {
               socket.send(JSON.stringify({ type: 'add_ai' }))
             }
-            if (pendingSetup.autoStart) socket.send(JSON.stringify({ type: 'start_game' }))
             pendingRoomSetupRef.current = null
           }
           return
@@ -930,7 +929,7 @@ function App() {
         customWordMode: 'disabled',
         customWords: [],
       }
-      pendingRoomSetupRef.current = { settings: roomSetup, aiCount: settings.count, autoStart: true }
+      pendingRoomSetupRef.current = { settings: roomSetup, aiCount: settings.count }
       setPlayerName(name)
       setPlayerAvatar(avatar)
       setAiSettings(settings)
