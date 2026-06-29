@@ -786,38 +786,92 @@ body {
   cursor: pointer;
 }
 
-.word-choice-panel {
-  padding: 10px 14px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  border: 4px solid var(--outline);
-  background: var(--panel-bg);
-  box-shadow: 5px 5px 0 var(--outline);
+.word-choice-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  padding: 22px;
+  display: grid;
+  place-items: center;
+  background: rgb(8 20 28 / 72%);
 }
 
-.word-choice-panel span {
+.word-choice-dialog {
+  position: relative;
+  width: min(560px, 100%);
+  padding: 22px;
+  display: grid;
+  gap: 16px;
+  border: 4px solid var(--outline);
+  background: var(--panel-bg);
+  box-shadow: 7px 7px 0 var(--outline);
   color: var(--outline);
-  font-size: 13px;
+  text-align: center;
+}
+
+.word-choice-dialog p {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.5;
+}
+
+.word-choice-dialog__timer {
+  position: absolute;
+  top: -18px;
+  right: 18px;
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  border: 4px solid var(--outline);
+  background: var(--gold);
+  box-shadow: 3px 3px 0 var(--outline);
+  font-size: 20px;
   font-weight: 900;
 }
 
-.word-choice-panel__options {
-  display: flex;
-  flex-wrap: wrap;
+.word-choice-dialog__waiting {
+  min-height: 112px;
+  display: grid;
+  place-items: center;
+  align-content: center;
   gap: 8px;
 }
 
+.word-choice-dialog__waiting strong {
+  font-size: 15px;
+  font-weight: 900;
+}
+
+.word-choice-dialog__dots {
+  font-size: 24px;
+  font-weight: 900;
+  letter-spacing: 6px;
+  animation: waiting-dots 900ms steps(3) infinite;
+}
+
+@keyframes waiting-dots {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.word-choice-panel__options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .word-choice-panel__options button {
-  min-height: 34px;
-  padding: 0 12px;
+  min-height: 48px;
+  padding: 8px 10px;
   border: 3px solid var(--outline);
   background: var(--gold);
   box-shadow: 2px 2px 0 var(--outline);
   color: var(--outline);
   font: inherit;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 900;
   cursor: pointer;
 }
