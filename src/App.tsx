@@ -1427,10 +1427,17 @@ function App() {
           </div>
         )}
         {gameMode === 'room' && roomPhase === 'lobby' && (
-          <section className="lobby-panel" aria-label="Room lobby">
+          <div className="lobby-dialog-backdrop">
+          <section
+            className="lobby-panel lobby-panel--dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="lobby-dialog-title"
+          >
             <div>
+              <div className="px-panel-title" id="lobby-dialog-title">WAITING FOR PLAYERS</div>
               <div className="lobby-code">
-                <div className="px-panel-title">ROOM {roomCode}</div>
+                <strong>ROOM {roomCode}</strong>
                 <button type="button" className="px-btn" onClick={copyRoomCode}>COPY CODE</button>
               </div>
               <p>
@@ -1602,11 +1609,12 @@ function App() {
                   ADD AI
                 </button>
                 <button type="button" className="px-btn px-btn--primary" onClick={startRoomGame} disabled={!canStartRoom}>
-                  START
+                  START GAME
                 </button>
               </div>
             )}
           </section>
+          </div>
         )}
         {gameMode === 'room' && (roomPhase === 'reveal' || roomPhase === 'ended') && (
           <section className={`transition-panel${roomPhase === 'ended' ? ' transition-panel--final' : ''}`} aria-label="Round summary">
