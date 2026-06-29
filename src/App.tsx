@@ -1449,6 +1449,27 @@ function App() {
                 Host: {roomHostName} · {connectedRoomPlayers.length}/{roomSettings.maxPlayers} connected · {roomSettings.rounds} rounds · {roomSettings.drawTime}s
               </p>
             </div>
+            <div className="lobby-players" aria-live="polite">
+              <div className="lobby-players__title">
+                <span>JOINED PLAYERS</span>
+                <strong>{connectedRoomPlayers.length}/{roomSettings.maxPlayers}</strong>
+              </div>
+              <div className="lobby-players__list">
+                {roomPlayers
+                  .filter((player) => !player.isSpectator)
+                  .map((player) => (
+                    <div className="lobby-player" key={player.id}>
+                      <span className="lobby-player__avatar">{avatarIcon(player.avatar)}</span>
+                      <span>
+                        <strong>{player.name}</strong>
+                        <small>
+                          {player.isHost ? 'HOST' : player.isAi ? 'AI PLAYER' : player.disconnected ? 'RECONNECTING' : 'READY'}
+                        </small>
+                      </span>
+                    </div>
+                  ))}
+              </div>
+            </div>
             <div className="lobby-settings">
               <label>
                 ROUNDS
