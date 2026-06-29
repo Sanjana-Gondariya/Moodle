@@ -953,6 +953,30 @@ body {
   box-shadow: 5px 5px 0 var(--outline);
 }
 
+.lobby-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  padding: 22px;
+  display: grid;
+  place-items: center;
+  background: rgb(8 20 28 / 72%);
+  overflow-y: auto;
+}
+
+.lobby-panel--dialog {
+  width: min(980px, 100%);
+  max-height: calc(100svh - 44px);
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 1fr);
+  align-items: start;
+  overflow-y: auto;
+}
+
+.lobby-panel--dialog .lobby-settings,
+.lobby-panel--dialog .lobby-actions {
+  grid-column: 1 / -1;
+}
+
 .lobby-panel p {
   margin: 8px 0 0;
   color: var(--outline);
