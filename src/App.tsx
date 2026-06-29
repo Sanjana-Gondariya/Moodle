@@ -1310,6 +1310,7 @@ function App() {
   const connectedRoomPlayers = roomPlayers.filter((player) => !player.isSpectator && !player.disconnected)
   const canStartRoom = connectedRoomPlayers.length >= 2 && (roomPhase === 'lobby' || roomPhase === 'ended')
   const roomHostName = roomPlayers.find((player) => player.isHost)?.name || 'Assigning host'
+  const currentDrawerName = roomPlayers.find((player) => player.isDrawer)?.name || 'The drawer'
   const rankedRoomPlayers = [...roomPlayers]
     .filter((player) => !player.isSpectator)
     .sort((a, b) => b.score - a.score)
@@ -1390,17 +1391,40 @@ function App() {
             </label>
           )}
         </section>
-        {gameMode === 'room' && isDrawer && isChoosingWord && wordChoices.length > 0 && (
-          <section className="word-choice-panel" aria-label="Choose word">
-            <span>Pick a word in {choiceTimeLeft}s</span>
-            <div className="word-choice-panel__options">
-              {wordChoices.map((word) => (
-                <button type="button" key={word} onClick={() => chooseRoomWord(word)}>
-                  {word}
-                </button>
-              ))}
-            </div>
-          </section>
+        {gameMode === 'room' && roomPhase === 'choosing' && (
+          <div className="word-choice-dialog-backdrop">
+            <section
+              className="word-choice-dialog"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="word-choice-title"
+            >
+              <div className="word-choice-dialog__timer" aria-label={`${choiceTimeLeft} seconds remaining`}>
+                {choiceTimeLeft}
+              </div>
+              <div className="px-panel-title" id="word-choice-title">
+                {isDrawer ? 'CHOOSE A WORD' : 'WORD SELECTION'}
+              </div>
+              {isDrawer && isChoosingWord ? (
+                <>
+                  <p>Pick one word to draw. Moodle chooses randomly when time runs out.</p>
+                  <div className="word-choice-panel__options">
+                    {wordChoices.slice(0, 3).map((word) => (
+                      <button type="button" key={word} onClick={() => chooseRoomWord(word)}>
+                        {word}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <div className="word-choice-dialog__waiting" aria-live="polite">
+                  <span className="word-choice-dialog__dots" aria-hidden>...</span>
+                  <strong>{currentDrawerName} is picking a word</strong>
+                  <p>The three choices are visible only to the drawer.</p>
+                </div>
+              )}
+            </section>
+          </div>
         )}
         {gameMode === 'room' && roomPhase === 'lobby' && (
           <section className="lobby-panel" aria-label="Room lobby">
