@@ -79,6 +79,12 @@ server/
 4. Guessers receive progressive hints and submit answers through real-time chat.
 5. The server validates guesses, awards points, advances rounds, and persists room history.
 
+The shared word bank is available through:
+
+```text
+GET /api/words?language=en&difficulty=medium&count=3
+```
+
 ## Tech Stack
 
 | Layer | Tools |
