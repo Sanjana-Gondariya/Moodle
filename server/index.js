@@ -1165,6 +1165,8 @@ loadHistory()
 loadRooms()
 
 const server = createServer(async (request, response) => {
+  const requestUrl = new URL(request.url || '/', `http://${request.headers.host || 'localhost'}`)
+
   if (request.method === 'OPTIONS') {
     sendJson(response, 204, {})
     return
@@ -1195,6 +1197,20 @@ const server = createServer(async (request, response) => {
       rooms: rooms.size,
       uptimeSeconds: Math.floor(process.uptime()),
     })
+    return
+  }
+
+  if (request.method === 'GET' && requestUrl.pathname === '/api/words') {
+    const result = getWords(
+      String(requestUrl.searchParams.get('language') || 'en').toLowerCase(),
+      String(requestUrl.searchParams.get('difficulty') || 'medium').toLowerCase(),
+      requestUrl.searchParams.get('count') || 3,
+    )
+    if (result.error) {
+      sendJson(response, 400, result)
+      return
+    }
+    sendJson(response, 200, result)
     return
   }
 
