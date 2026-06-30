@@ -8,17 +8,39 @@ const PORT = Number(process.env.PORT || 8787)
 const HOST = process.env.HOST || '127.0.0.1'
 const MODEL = process.env.OPENAI_MODEL || 'gpt-4.1-mini'
 const ROOM_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
-const WORDS = ['MOODLE', 'ROCKET', 'PIZZA', 'CASTLE', 'ROBOT', 'FLOWER', 'SUN', 'CAT']
+const WORDS = [
+  'MOODLE', 'ROCKET', 'PIZZA', 'CASTLE', 'ROBOT', 'FLOWER',
+  'BICYCLE', 'CAMERA', 'DRAGON', 'GUITAR', 'PENGUIN', 'RAINBOW',
+  'SAILBOAT', 'SNOWMAN', 'VOLCANO', 'WIZARD',
+]
 const WORD_BANK = {
   en: {
-    easy: ['SUN', 'CAT', 'TREE', 'BOOK', 'STAR', 'FISH'],
+    easy: [
+      'SUN', 'CAT', 'TREE', 'BOOK', 'STAR', 'FISH', 'APPLE', 'BALL',
+      'CLOUD', 'HOUSE', 'MOON', 'CAR', 'HAT', 'CAKE', 'DUCK', 'SHOE',
+    ],
     medium: WORDS,
-    hard: ['ASTRONAUT', 'LIGHTHOUSE', 'DINOSAUR', 'MICROSCOPE', 'SUBMARINE', 'TELESCOPE'],
+    hard: [
+      'ASTRONAUT', 'LIGHTHOUSE', 'DINOSAUR', 'MICROSCOPE', 'SUBMARINE',
+      'TELESCOPE', 'HELICOPTER', 'LABYRINTH', 'ORCHESTRA', 'PARACHUTE',
+      'SCORPION', 'SKYSCRAPER', 'SPACESHIP', 'WATERFALL', 'WINDMILL',
+    ],
   },
   es: {
-    easy: ['SOL', 'GATO', 'ARBOL', 'LIBRO', 'PEZ', 'FLOR'],
-    medium: ['CASA', 'COHETE', 'PIZZA', 'CASTILLO', 'ROBOT', 'LUNA'],
-    hard: ['ASTRONAUTA', 'DINOSAURIO', 'TELESCOPIO', 'SUBMARINO', 'MARIPOSA'],
+    easy: [
+      'SOL', 'GATO', 'ARBOL', 'LIBRO', 'PEZ', 'FLOR', 'CASA', 'LUNA',
+      'PAN', 'PERRO', 'MANO', 'TAZA', 'NUBE', 'SILLA', 'RELOJ', 'ZAPATO',
+    ],
+    medium: [
+      'COHETE', 'PIZZA', 'CASTILLO', 'ROBOT', 'BICICLETA', 'CAMARA',
+      'DRAGON', 'GUITARRA', 'PINGUINO', 'ARCOIRIS', 'VELERO', 'MUNIECO',
+      'VOLCAN', 'MAGO', 'TORTUGA', 'CORONA',
+    ],
+    hard: [
+      'ASTRONAUTA', 'DINOSAURIO', 'TELESCOPIO', 'SUBMARINO', 'MARIPOSA',
+      'HELICOPTERO', 'LABERINTO', 'ORQUESTA', 'PARACAIDAS', 'ESCORPION',
+      'RASCACIELOS', 'NAVE ESPACIAL', 'CASCADA', 'MOLINO', 'MICROSCOPIO',
+    ],
   },
 }
 const ROUND_SECONDS = 60
