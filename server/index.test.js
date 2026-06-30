@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   decodeWebSocketFrames,
+  getWords,
   normalizeGuess,
   sanitizePlayerName,
   sanitizeStroke,
@@ -20,6 +21,27 @@ function maskedTextFrame(payload) {
 
 test('normalizes guesses consistently', () => {
   assert.equal(normalizeGuess('  APP-le! '), 'apple')
+})
+
+test('returns filtered word selections', () => {
+  const spanishEasyWords = new Set([
+    'SOL', 'GATO', 'ARBOL', 'LIBRO', 'PEZ', 'FLOR', 'CASA', 'LUNA',
+    'PAN', 'PERRO', 'MANO', 'TAZA', 'NUBE', 'SILLA', 'RELOJ', 'ZAPATO',
+  ])
+  const easySpanish = getWords('es', 'easy', 3)
+  assert.equal(easySpanish.language, 'es')
+  assert.equal(easySpanish.difficulty, 'easy')
+  assert.equal(easySpanish.words.length, 3)
+  assert.ok(easySpanish.words.every((word) => spanishEasyWords.has(word)))
+
+  const allEnglish = getWords('en', 'all', 20)
+  assert.equal(allEnglish.words.length, 20)
+  assert.equal(new Set(allEnglish.words).size, allEnglish.words.length)
+})
+
+test('rejects unsupported word filters', () => {
+  assert.match(getWords('fr', 'easy', 3).error, /Unsupported language/)
+  assert.match(getWords('en', 'impossible', 3).error, /Unsupported difficulty/)
 })
 
 test('sanitizes names and chat content', () => {
