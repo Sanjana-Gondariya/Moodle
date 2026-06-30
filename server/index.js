@@ -189,6 +189,32 @@ function wordPoolFor(room) {
   return baseWords
 }
 
+function getWords(language = 'en', difficulty = 'medium', count = 3) {
+  if (!WORD_BANK[language]) {
+    return { error: `Unsupported language "${language}". Use en or es.` }
+  }
+  if (difficulty !== 'all' && !WORD_BANK[language][difficulty]) {
+    return { error: `Unsupported difficulty "${difficulty}". Use easy, medium, hard, or all.` }
+  }
+
+  const source = difficulty === 'all'
+    ? Object.values(WORD_BANK[language]).flat()
+    : WORD_BANK[language][difficulty]
+  const uniqueWords = [...new Set(source)]
+  for (let index = uniqueWords.length - 1; index > 0; index -= 1) {
+    const randomIndex = Math.floor(Math.random() * (index + 1))
+    ;[uniqueWords[index], uniqueWords[randomIndex]] = [uniqueWords[randomIndex], uniqueWords[index]]
+  }
+
+  const requestedCount = clampNumber(count, 1, 20, 3)
+  return {
+    language,
+    difficulty,
+    count: Math.min(requestedCount, uniqueWords.length),
+    words: uniqueWords.slice(0, requestedCount),
+  }
+}
+
 function pickWord(room) {
   const words = wordPoolFor(room)
   return words[Math.floor(Math.random() * words.length)]
@@ -1522,6 +1548,7 @@ export function startServer(port = PORT, host = HOST) {
 
 export {
   decodeWebSocketFrames,
+  getWords,
   normalizeGuess,
   sanitizePlayerName,
   sanitizeStroke,
